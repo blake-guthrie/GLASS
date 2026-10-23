@@ -255,7 +255,16 @@ def fixture_checks(driver, popup):
         driver.call('POST', '/window', {'handle': popup_tab})
         before = fixture()['starts']
         driver.promise('browser.runtime.getBackgroundPage().then(page => { page.location.reload(); return true; })')
-        wait(lambda: fixture().get('starts', before) != before, 'event background reload')
+        def restarted_background():
+            # During the requested reload no receiver exists until module startup
+            # finishes. Observe that state within the unchanged readiness deadline;
+            # all other errors remain failures.
+            state = driver.promise('''browser.runtime.sendMessage({type:'fixture'}).catch(error => {
+                if (String(error).includes('Receiving end does not exist')) return null;
+                throw error;
+            })''')
+            return state and state['starts'] != before
+        wait(restarted_background, 'event background reload')
         wait(lambda: any(not s['closed'] and s['subscriptions'] >= 2 for s in fixture()['sockets']), 'content reconnect after background reload')
         check('Firefox background reinitializes and content reconnects watcher', driver.message({'type': 'getReport', 'key': MINT})['mint'] == MINT)
         check('Firefox settings survive background restart', driver.promise('browser.storage.sync.get("settings")')['settings']['enabled'])
