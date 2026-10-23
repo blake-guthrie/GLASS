@@ -207,6 +207,12 @@ Every request goes to the RPC you chose (or the built-in fallbacks `solana-rpc.p
 
 ## Development
 
+Creator history also reads bounded Bonk, Raydium LaunchLab and Meteora DBC
+initialization history through the configured RPC. Coverage is reported per source;
+missing market outcomes stay unknown. See [the API contract, protocol sources and
+coverage limits](docs/creator-history.md). Its new tests use labelled synthetic
+protocol fixtures alongside the unchanged existing scanner fixtures.
+
 ```bash
 npm test                          # full test suite, real mainnet fixtures, offline
 node cli/scan.mjs <mint-or-pair>  # the same engine in your terminal (--json out.json, --rpc URL)
