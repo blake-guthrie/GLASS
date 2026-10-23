@@ -223,6 +223,13 @@ node cli/pack.mjs                 # builds dist/glass-extension-<version>.zip
 | `src/lib/livewatch.js` | Websocket subscriptions for real-time cluster balances and price |
 | `src/data/known.js` | Community labels: exchanges, routers, launch tools |
 
+### Trajectory comparison
+
+Trajectory comparison is available as a pure, caller-supplied-data module. See the
+[input contract, metric and synthetic example](docs/trajectory.md). It compares all
+three timed curves and reports historical outcome counts; it does not collect a
+library, add a panel feature, or predict graduation.
+
 ## License
 
 [MIT](LICENSE). Use it, fork it, build on it.
