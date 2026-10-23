@@ -391,12 +391,12 @@ export async function runScan(rpc, identifier, opts = {}) {
           wallets: operatorWallets,
           linkers: report.operatorCluster?.linkers || [],
         };
-        // Two sources in parallel: pump.fun's record of everything this creator wallet (and its funders)
-        // ever launched, and on-chain sampling for launches that other cluster wallets bundled.
+        // Creator records combine pump.fun with bounded non-pump initialization history.
+        // Independently sample launches that other cluster wallets bundled.
         const linkerCreators = cluster.linkers.slice(0, 3);
         const [profile, linkerProfiles, prior] = await Promise.all([
-          creatorProfile(creator, { currentMint: report.mint, log }),
-          Promise.all(linkerCreators.map((w) => creatorProfile(w, { currentMint: report.mint, log }).catch(() => ({ available: false })))),
+          creatorProfile(creator, { currentMint: report.mint, log, rpc: hrpc }),
+          Promise.all(linkerCreators.map((w) => creatorProfile(w, { currentMint: report.mint, log, rpc: hrpc }).catch(() => ({ available: false })))),
           discoverPriorLaunches(hrpc, report.mint, cluster, sigLists, {
             memory: opts.memory,
             maxWallets: settings.maxOperatorWallets,
@@ -418,7 +418,7 @@ export async function runScan(rpc, identifier, opts = {}) {
               linkedBy: [
                 {
                   wallet: linkerCreators[i],
-                  how: 'a funder of the launch buyers created it (pump.fun record)',
+                  how: `a funder of the launch buyers is the recorded creator (${l.source})`,
                 },
               ],
             });
@@ -430,6 +430,7 @@ export async function runScan(rpc, identifier, opts = {}) {
           discovered: apiLaunches.length + prior.length,
           funderHops: prior.funderHops || [],
           profile: profile?.available ? profileSummary(profile) : null,
+          coverage: profile?.coverage,
           linkerProfiles: linkerProfiles.filter((x) => x?.available && x.totalCreated > 0).map(profileSummary),
           profileError: profile?.available ? null : profile?.reason || null,
         };
@@ -437,7 +438,7 @@ export async function runScan(rpc, identifier, opts = {}) {
         // Dev sells on the most recent launches, read from the dev's own token accounts (exact, cheap)
         const solUsd = await solPriceUsd();
         const devExitsP = pMap(
-          apiLaunches.filter((l) => !l.viaInfra).slice(0, 10),
+          apiLaunches.filter((l) => !l.viaInfra && l.source === 'pump.fun').slice(0, 10),
           async (l) => {
             try {
               // pick an RPC that still has that launch's history (archive for older ones); skip what nobody has
