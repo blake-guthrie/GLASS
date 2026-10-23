@@ -1,4 +1,5 @@
-// Service worker: runs scans on behalf of content scripts, streams progressive reports over a port,
+import { api } from './lib/webext.js';
+// Chrome service worker / Firefox event page: streams progressive reports over a port,
 // caches results, and keeps the operator memory.
 import { RpcClient } from './lib/rpc.js';
 import { runScan } from './lib/scan/pipeline.js';
@@ -44,7 +45,7 @@ evictOldReports();
 const inflight = new Map(); // key → { report, ports:Set, abort:{aborted} }
 
 async function getSettings() {
-  const r = await chrome.storage.sync.get('settings');
+  const r = await api.storage.sync.get('settings');
   return { ...DEFAULTS, ...(r?.settings || {}) };
 }
 
@@ -63,29 +64,32 @@ function broadcast(job, msg) {
 }
 
 async function startScan(key, identifier, hintIsMint, port, force) {
+  if (connections.get(port)?.disconnected) return;
   const existing = inflight.get(key);
   if (existing) {
     existing.ports.add(port);
-    if (existing.report) port.postMessage({ type: 'stage', stage: existing.report.stage, report: existing.report, joined: true });
+    if (existing.report) port.postMessage({ type: existing.report.finishedAt ? 'done' : 'stage', stage: existing.report.stage, report: existing.report, joined: true });
     return;
   }
-  const settings = await getSettings();
-  let servedCached = false;
-  if (!force) {
-    const cached = await reportCache.get(key);
-    if (cached) {
-      port.postMessage({ type: 'done', report: cached, cached: true });
-      // Still refresh in the background if older than 60s — silently, so the panel doesn't flicker back
-      // to a half-empty report; the fresh one replaces it when complete.
-      if (Date.now() - (cached.finishedAt || 0) < 60_000) return;
-      servedCached = true;
-    }
-  }
-  const job = { report: null, ports: new Set([port]), abort: { aborted: false }, silentUntilDone: servedCached };
+  // Reserve before the first await: simultaneous cold-start requests share one job,
+  // and disconnect cleanup can find it while settings/cache storage is pending.
+  const job = { report: null, ports: new Set([port]), abort: { aborted: false }, silentUntilDone: false };
   inflight.set(key, job);
-  const rpc = makeRpc(settings);
-  const heartbeat = setInterval(() => broadcast(job, { type: 'tick', rpcCalls: rpc.totalCalls, degraded: rpc.totalDegraded }), 15_000);
+  let heartbeat;
   try {
+    const settings = await getSettings();
+    if (!force) {
+      const cached = await reportCache.get(key);
+      if (cached) {
+        job.report = cached;
+        broadcast(job, { type: 'done', report: cached, cached: true });
+        if (Date.now() - (cached.finishedAt || 0) < 60_000) return;
+        job.silentUntilDone = true;
+      }
+    }
+    if (job.abort.aborted) return;
+    const rpc = makeRpc(settings);
+    heartbeat = setInterval(() => broadcast(job, { type: 'tick', rpcCalls: rpc.totalCalls, degraded: rpc.totalDegraded }), 15_000);
     const report = await runScan(rpc, identifier, {
       settings,
       memory,
@@ -120,7 +124,10 @@ async function startScan(key, identifier, hintIsMint, port, force) {
 }
 
 const watchers = new Map(); // port → LiveWatcher
+const connections = new WeakMap(); // port → lifetime / pending watch generation
 function stopWatch(port) {
+  const state = connections.get(port);
+  if (state) state.watchGeneration++;
   const w = watchers.get(port);
   if (w) {
     w.stop();
@@ -129,7 +136,11 @@ function stopWatch(port) {
 }
 async function startWatch(port, msg) {
   stopWatch(port);
+  const state = connections.get(port);
+  if (!state || state.disconnected) return;
+  const generation = state.watchGeneration;
   const settings = await getSettings();
+  if (state.disconnected || state.watchGeneration !== generation) return;
   const wsUrl = wsUrlFor(settings.rpcUrl || DEFAULTS.rpcUrl);
   if (!wsUrl || !msg.mint || !Array.isArray(msg.wallets) || !msg.wallets.length) return;
   const w = new LiveWatcher({
@@ -159,14 +170,25 @@ async function startWatch(port, msg) {
   await w.start();
 }
 
-chrome.runtime.onConnect.addListener((port) => {
+api.runtime.onConnect.addListener((port) => {
   if (port.name !== 'glass-scan') return;
-  let key = null;
+  const state = { disconnected: false, watchGeneration: 0 };
+  connections.set(port, state);
+  function leaveScans() {
+    for (const [key, job] of inflight) {
+      if (!job.ports.delete(port)) continue;
+      // Another tab can join the scan before its grace period expires.
+      setTimeout(() => {
+        if (inflight.get(key) === job && job.ports.size === 0) job.abort.aborted = true;
+      }, 30_000);
+    }
+  }
   port.onMessage.addListener((msg) => {
+    if (state.disconnected) return;
     if (msg?.type === 'scan' && msg.identifier) {
-      key = msg.identifier;
+      leaveScans();
       stopWatch(port);
-      startScan(key, msg.identifier, !!msg.hintIsMint, port, !!msg.force).catch((e) => {
+      startScan(msg.identifier, msg.identifier, !!msg.hintIsMint, port, !!msg.force).catch((e) => {
         try {
           port.postMessage({ type: 'error', message: e?.message || String(e) });
         } catch {
@@ -178,19 +200,13 @@ chrome.runtime.onConnect.addListener((port) => {
     } else if (msg?.type === 'unwatch') stopWatch(port);
   });
   port.onDisconnect.addListener(() => {
+    state.disconnected = true;
     stopWatch(port);
-    const job = key && inflight.get(key);
-    if (job) {
-      job.ports.delete(port);
-      // Let the scan finish (another tab may ask for it), unless nobody is listening for 30s.
-      setTimeout(() => {
-        if (inflight.get(key) === job && job.ports.size === 0) job.abort.aborted = true;
-      }, 30_000);
-    }
+    leaveScans();
   });
 });
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
     switch (msg?.type) {
       case 'testRpc': {
