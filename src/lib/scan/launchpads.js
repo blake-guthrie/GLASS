@@ -42,7 +42,7 @@ function invocationResults(logs) {
     if (typeof line !== 'string') continue;
     const start = /^Program ([1-9A-HJ-NP-Za-km-z]+) invoke \[(\d+)\]$/.exec(line);
     if (start) {
-      const call = { program: start[1], depth: Number(start[2]), success: false };
+      const call = { program: start[1], depth: Number(start[2]), success: false, parent: stack.at(-1) };
       stack.push(call);
       if (!queues.has(call.program)) queues.set(call.program, []);
       queues.get(call.program).push(call);
@@ -52,6 +52,15 @@ function invocationResults(logs) {
     if (end && stack.at(-1)?.program === end[1]) stack.pop().success = end[2] === 'success';
   }
   return queues;
+}
+
+function committedInvocation(call) {
+  while (call?.success) {
+    if (call.depth === 1) return true;
+    if (call.parent?.depth !== call.depth - 1) return false;
+    call = call.parent;
+  }
+  return false;
 }
 
 /** Successful RPC jsonParsed OR raw JSON transactions, including CPI and v0 lookup keys.
@@ -80,7 +89,7 @@ export function launchesFromTransaction(tx, creator) {
     const ray = program === LAUNCHPAD_PROGRAMS.launchlab;
     if (!ray && program !== LAUNCHPAD_PROGRAMS.meteora) continue;
     const invocation = invocations.get(program)?.shift();
-    if (inner && (!invocation?.success || (ix.stackHeight != null && invocation.depth !== ix.stackHeight))) continue;
+    if (inner && (!committedInvocation(invocation) || (ix.stackHeight != null && invocation.depth !== ix.stackHeight))) continue;
     try {
       const data = decodeBase58(ix.data);
       const schema = (ray ? RAY_INIT : DBC_INIT).get(Array.from(data.subarray(0, 8)).join(','));

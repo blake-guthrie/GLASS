@@ -66,6 +66,19 @@ test('caught failed CPI and missing/truncated success logs do not fabricate a la
   }
 });
 
+test('successful initialization rolled back by a caught ancestor CPI is not a launch', () => {
+  const tx = fixture({ inner: true });
+  const program = tx.meta.innerInstructions[0].instructions[0].programId;
+  const parent = key(248), outer = key(249);
+  tx.meta.innerInstructions[0].instructions.unshift({ programId: parent, accounts: [], data: '' });
+  tx.meta.logMessages = [
+    `Program ${outer} invoke [1]`, `Program ${parent} invoke [2]`,
+    `Program ${program} invoke [3]`, `Program ${program} success`,
+    `Program ${parent} failed: custom program error: 0x1`, `Program ${outer} success`,
+  ];
+  assert.deepEqual(launchesFromTransaction(tx, key(9)), []);
+});
+
 test('bounded history paginates and exposes a continuation, never claims all-time completeness', async () => {
   const txs = [fixture({ id: 3 }), fixture({ id: 2 }), fixture({ id: 1 })];
   const rpc = rpcFixture(txs);

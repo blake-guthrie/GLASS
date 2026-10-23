@@ -37,7 +37,7 @@ on-chain designation, not proof that the wallet owner consented or operated a UI
 Meteora permits creator-rights transfers; those instructions are never new launches.
 This method can retain attribution after transfers or pool-account closure if the
 provider still serves the original transaction.
-Inner instructions additionally require their invocation's successful program log:
+Inner instructions additionally require successful logs for the invocation and all ancestors:
 a caller can catch a failed CPI and still complete its outer transaction. Missing
 or truncated success logs omit those inner records rather than invent attribution.
 
