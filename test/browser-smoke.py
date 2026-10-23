@@ -142,8 +142,8 @@ def permission_prompt(driver, allow):
     # Operates solely on this disposable headless Firefox's actual permission prompt.
     driver.call('POST', '/moz/context', {'context': 'chrome'})
     try:
-        wait(lambda: driver.js('return !!PopupNotifications.getNotification("webextension-permissions", gBrowser.selectedBrowser);'), 'optional host prompt')
-        driver.js('''const n = PopupNotifications.getNotification('webextension-permissions', gBrowser.selectedBrowser);
+        wait(lambda: driver.js('return !!PopupNotifications.getNotification("addon-webext-permissions", gBrowser.selectedBrowser);'), 'optional host prompt')
+        driver.js('''const n = PopupNotifications.getNotification('addon-webext-permissions', gBrowser.selectedBrowser);
                      if (arguments[0]) n.mainAction.callback(); else n.secondaryActions[0].callback();
                      PopupNotifications.remove(n);''', allow)
     finally:
