@@ -3,6 +3,7 @@
 Run in a disposable Linux network namespace with loopback enabled and pump.fun
 mapped to 127.0.0.1. No installation, package manager, account, wallet or RPC.
 """
+import argparse
 import base64
 import errno
 import hashlib
@@ -28,6 +29,10 @@ MINT = '11111111111111111111111111111112'
 ID = 'glass-launch-scanner@blake-guthrie.github.io'
 UUID = 'cb8607dd-92fe-4f2e-9917-6eacbce13bd9'
 results = {'checks': [], 'browsers': {}, 'limits': 'Linux desktop fixtures, no live chain calls, signing or minimum-version runtime proof.'}
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('browser', nargs='?', choices=['all', 'firefox', 'chromium'], default='all')
+selected = parser.parse_args().browser
+results['selected'] = selected
 
 
 def check(name, condition, detail=None):
@@ -56,7 +61,7 @@ class Driver:
         number = len(list(OUT.glob(f'{kind}-driver-*.log'))) + 1
         self.log = (OUT / f'{kind}-driver-{number}.log').open('w')
         name = 'geckodriver' if kind == 'firefox' else 'chromedriver'
-        command = [shutil.which(name), '--port', str(self.port)]
+        command = [shutil.which(name)] + (['--port', str(self.port)] if kind == 'firefox' else [f'--port={self.port}'])
         if kind == 'firefox':
             # Mozilla's geckodriver flag, not a Firefox capability argument.
             # Needed only to operate this isolated profile's host-permission prompt.
@@ -309,49 +314,51 @@ def main():
         context.load_cert_chain(temp/'cert.pem', temp/'key.pem')
         server.socket = context.wrap_socket(server.socket, server_side=True)
         threading.Thread(target=server.serve_forever, daemon=True).start()
-        firefox = Driver('firefox')
-        try:
-            # Original upstream manifest must fail on Firefox's service-worker gap.
-            baseline = ROOT.parent / 'baseline'
-            if baseline.exists():
-                control = temp / 'original'
-                shutil.copytree(baseline, control, ignore=shutil.ignore_patterns('.git'))
-                control_manifest = json.loads((control/'manifest.json').read_text())
-                control_manifest['browser_specific_settings'] = {'gecko': {'id': ID}}
-                (control/'manifest.json').write_text(json.dumps(control_manifest))
-                try:
-                    firefox.call('POST', '/moz/addon/install', {'path': str(control), 'temporary': True})
-                except RuntimeError as error:
-                    check('original service-worker-only manifest rejected by Firefox', 'service_worker' in str(error) or 'background' in str(error), str(error))
-                else:
-                    raise AssertionError('Original Chrome manifest unexpectedly installed in Firefox')
-            ident = firefox.call('POST', '/moz/addon/install', {'path': str(ROOT/'dist/firefox'), 'temporary': True})
-            check('exact Firefox package installs', ident == ID)
-            popup = f'moz-extension://{UUID}/src/popup.html'
-            popup_checks(firefox, popup, permission_test=True)
-            copy = fixture_copy('firefox', temp)
-            # Updating the add-on closes its pages. Keep a normal tab open so
-            # Firefox does not quit when the sole extension tab disappears.
-            firefox.navigate('about:blank')
-            firefox.call('POST', '/moz/addon/install', {'path': str(copy), 'temporary': True})
-            fixture_checks(firefox, popup)
-        finally:
-            firefox.close()
-        chrome = Driver('chromium', ROOT/'dist/chrome')
-        try:
-            targets = wait(lambda: [t for t in chrome.call('POST', '/goog/cdp/execute', {'cmd': 'Target.getTargets', 'params': {}})['targetInfos'] if t['type'] == 'service_worker' and t['url'].startswith('chrome-extension://')], 'Chrome service worker')
-            popup = targets[0]['url'].rsplit('/', 2)[0] + '/src/popup.html'
-            popup_checks(chrome, popup)
-        finally:
-            chrome.close()
-        copy = fixture_copy('chrome', temp)
-        chrome = Driver('chromium', copy)
-        try:
-            targets = wait(lambda: [t for t in chrome.call('POST', '/goog/cdp/execute', {'cmd': 'Target.getTargets', 'params': {}})['targetInfos'] if t['type'] == 'service_worker' and t['url'].startswith('chrome-extension://')], 'fixture Chrome worker')
-            popup = targets[0]['url'].rsplit('/', 1)[0] + '/src/popup.html'
-            fixture_checks(chrome, popup)
-        finally:
-            chrome.close()
+        if selected in ('all', 'firefox'):
+            firefox = Driver('firefox')
+            try:
+                # Original upstream manifest must fail on Firefox's service-worker gap.
+                baseline = ROOT.parent / 'baseline'
+                if baseline.exists():
+                    control = temp / 'original'
+                    shutil.copytree(baseline, control, ignore=shutil.ignore_patterns('.git'))
+                    control_manifest = json.loads((control/'manifest.json').read_text())
+                    control_manifest['browser_specific_settings'] = {'gecko': {'id': ID}}
+                    (control/'manifest.json').write_text(json.dumps(control_manifest))
+                    try:
+                        firefox.call('POST', '/moz/addon/install', {'path': str(control), 'temporary': True})
+                    except RuntimeError as error:
+                        check('original service-worker-only manifest rejected by Firefox', 'service_worker' in str(error) or 'background' in str(error), str(error))
+                    else:
+                        raise AssertionError('Original Chrome manifest unexpectedly installed in Firefox')
+                ident = firefox.call('POST', '/moz/addon/install', {'path': str(ROOT/'dist/firefox'), 'temporary': True})
+                check('exact Firefox package installs', ident == ID)
+                popup = f'moz-extension://{UUID}/src/popup.html'
+                popup_checks(firefox, popup, permission_test=True)
+                copy = fixture_copy('firefox', temp)
+                # Updating the add-on closes its pages. Keep a normal tab open so
+                # Firefox does not quit when the sole extension tab disappears.
+                firefox.navigate('about:blank')
+                firefox.call('POST', '/moz/addon/install', {'path': str(copy), 'temporary': True})
+                fixture_checks(firefox, popup)
+            finally:
+                firefox.close()
+        if selected in ('all', 'chromium'):
+            chrome = Driver('chromium', ROOT/'dist/chrome')
+            try:
+                targets = wait(lambda: [t for t in chrome.call('POST', '/goog/cdp/execute', {'cmd': 'Target.getTargets', 'params': {}})['targetInfos'] if t['type'] == 'service_worker' and t['url'].startswith('chrome-extension://')], 'Chrome service worker')
+                popup = targets[0]['url'].rsplit('/', 2)[0] + '/src/popup.html'
+                popup_checks(chrome, popup)
+            finally:
+                chrome.close()
+            copy = fixture_copy('chrome', temp)
+            chrome = Driver('chromium', copy)
+            try:
+                targets = wait(lambda: [t for t in chrome.call('POST', '/goog/cdp/execute', {'cmd': 'Target.getTargets', 'params': {}})['targetInfos'] if t['type'] == 'service_worker' and t['url'].startswith('chrome-extension://')], 'fixture Chrome worker')
+                popup = targets[0]['url'].rsplit('/', 1)[0] + '/src/popup.html'
+                fixture_checks(chrome, popup)
+            finally:
+                chrome.close()
         server.shutdown()
 
 
