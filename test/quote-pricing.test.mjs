@@ -10,6 +10,7 @@ import { runScan } from '../src/lib/scan/pipeline.js';
 import { resolveMint } from '../src/lib/scan/resolve.js';
 import { devExitOnLaunch, clusterExitOnLaunch, analysePriorLaunches } from '../src/lib/scan/operator.js';
 import { decodeCurve, LiveWatcher } from '../src/lib/livewatch.js';
+import { normalisePair } from '../src/lib/market.js';
 
 const USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const fx = JSON.parse(fs.readFileSync(new URL('./fixtures/pump-txs.json', import.meta.url)));
@@ -188,4 +189,14 @@ test('pool resolution excludes the USDC quote vault in both account and transact
       const r=await resolveMint(rpc,fx.bondingCurve);assert.equal(r.mint,fx.mint);
     }
   } finally {globalThis.fetch=prior;}
+});
+
+test('market pair retains its quote identity for a safe SOL/USD fallback', async () => {
+  for(const mint of [PROGRAMS.WSOL,USDC,PROGRAMS.TOKEN]) {
+    const pair=normalisePair({baseToken:{address:fx.mint},quoteToken:{address:mint},priceUsd:'0.2',priceNative:'0.002'});
+    assert.equal(pair.quoteMint,mint);
+    const { marketSolUsd } = await import('../src/lib/quote.js');
+    assert.equal(marketSolUsd(pair),mint===PROGRAMS.WSOL?100:null);
+    assert.equal(marketSolUsd({...pair,priceNative:0}),null);
+  }
 });

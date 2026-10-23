@@ -15,3 +15,10 @@ export function quoteUsd(amount, mint, solUsd) {
   return Number.isFinite(rate) && rate > 0 ? amount * rate : null;
 }
 
+// DexScreener's priceNative is in the pair's quote asset, not necessarily SOL.
+export function marketSolUsd(market) {
+  if (quoteInfo(market?.quoteMint).quoteMint !== PROGRAMS.WSOL) return null;
+  const rate = market?.priceUsd / market?.priceNative;
+  return Number.isFinite(rate) && rate > 0 ? rate : null;
+}
+

@@ -26,6 +26,7 @@ export function normalisePair(p) {
     dexId: p.dexId,
     url: p.url,
     mint: p.baseToken?.address,
+    quoteMint: p.quoteToken?.address ?? null,
     name: p.baseToken?.name,
     symbol: p.baseToken?.symbol,
     priceUsd: p.priceUsd ? Number(p.priceUsd) : null,

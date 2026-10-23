@@ -7,6 +7,7 @@ import { LiveWatcher, wsUrlFor } from './lib/livewatch.js';
 import { computeScore } from './lib/scan/score.js';
 import { ChromeStore, TtlCache, OperatorMemory } from './lib/cache.js';
 import { DEFAULTS } from './lib/constants.js';
+import { marketSolUsd } from './lib/quote.js';
 
 const store = new ChromeStore('local');
 const CACHE_PREFIX = 'report:v4:'; // bump when the report shape changes so old cached reports can't break the panel
@@ -138,7 +139,7 @@ async function startWatch(port, msg) {
     tokenProgram: msg.tokenProgram,
     wallets: msg.wallets,
     curve: msg.curve || null,
-    solUsd: msg.solUsd,
+    solUsd: msg.solUsd || marketSolUsd(msg.market),
     log: (m) => console.debug('[GLASS live]', m),
     onEvent: (ev) => {
       try {

@@ -709,7 +709,7 @@ tr.how td { border-bottom: 1px solid #171b25; }
     const wallets = [{ wallet: r.creation.creator, kind: 'dev' }, ...win.filter((b) => b.kind !== 'organic').map((b) => ({ wallet: b.wallet, kind: b.kind || 'bundle' }))].filter((w) => w.wallet).slice(0, 40);
     const balances = [...(r.live?.holdings || []), ...(r.live?.otherHoldings || [])].map((h) => ({ wallet: h.wallet, now: h.now }));
     try {
-      port.postMessage({ type: 'watch', mint: r.mint, tokenProgram: r.tokenProgram, wallets, balances, curve: r.creation.bondingCurve || null, solUsd: r.solUsd });
+      port.postMessage({ type: 'watch', mint: r.mint, tokenProgram: r.tokenProgram, wallets, balances, curve: r.creation.bondingCurve || null, solUsd: r.solUsd, market: r.market });
     } catch {
       /* port gone */
     }
