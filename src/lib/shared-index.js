@@ -120,7 +120,7 @@ export async function lookupSharedSnapshot(mint, settings, { fetcher = fetch, si
     const snapshot = validateSnapshot(JSON.parse(new TextDecoder().decode(bytes)), { mint, settings, now: now ?? Date.now() });
     return snapshot && !controller.signal.aborted ? { snapshot, origin: base.origin } : null;
   } catch { return null; }
-  finally { clearTimeout(timeout); signal?.removeEventListener?.('abort', abort); }
+  finally { controller.abort(); clearTimeout(timeout); signal?.removeEventListener?.('abort', abort); }
 }
 
 export function snapshotReport(hit) {
