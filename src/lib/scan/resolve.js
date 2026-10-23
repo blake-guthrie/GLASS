@@ -3,6 +3,7 @@
 import { isBase58Address } from '../base58.js';
 import { dexPairInfo, dexTokenInfo } from '../market.js';
 import { PROGRAMS } from '../constants.js';
+import { USDC_MINT } from '../quote.js';
 
 export async function resolveMint(rpc, identifier, { hintIsMint = false } = {}) {
   if (!isBase58Address(identifier)) return { mint: null, error: 'not a Solana address' };
@@ -24,13 +25,13 @@ export async function resolveMint(rpc, identifier, { hintIsMint = false } = {}) 
       // pool / bonding curve: its token accounts tell us the mint (indexed RPC), else read the mint out of
       // the pool's most recent transaction (works on any RPC)
       const mints = await rpc.getOwnerTokenMints(identifier);
-      const nonSol = mints.filter((m) => m.mint !== PROGRAMS.WSOL).sort((a, b) => b.amount - a.amount);
+      const nonSol = mints.filter((m) => m.mint !== PROGRAMS.WSOL && m.mint !== USDC_MINT).sort((a, b) => b.amount - a.amount);
       if (nonSol[0]) return { mint: nonSol[0].mint, pair: null, via: 'rpc-pool' };
       const sigs = await rpc.getSignaturesForAddress(identifier, { limit: 5 });
       for (const s of sigs || []) {
         const raw = await rpc.getTransaction(s.signature);
         const tb = raw?.meta?.postTokenBalances || [];
-        const m = tb.map((b) => b.mint).find((x) => x && x !== PROGRAMS.WSOL);
+        const m = tb.map((b) => b.mint).find((x) => x && x !== PROGRAMS.WSOL && x !== USDC_MINT);
         if (m) return { mint: m, pair: null, via: 'rpc-pool-tx' };
       }
     }

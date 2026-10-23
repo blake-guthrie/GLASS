@@ -207,6 +207,10 @@ Every request goes to the RPC you chose (or the built-in fallbacks `solana-rpc.p
 
 ## Development
 
+Pump quote pricing follows the [official event and account layouts](https://github.com/pump-fun/pump-public-docs/blob/main/idl/pump.json). SOL uses nine decimals and a SOL/USD rate; USDC uses six decimals and is valued at $1 per USDC. Quote identity is retained through launch, live-curve and historical market-cap calculations. Unsupported quote assets remain unpriced. SOL-only spend fields show unavailable values for non-SOL trades, and existing cached reports are invalidated after this pricing change.
+
+`test/quote-pricing.test.mjs` covers synthetic binary USDC/unknown-quote cases alongside the unchanged recorded SOL fixtures. It exercises the scan fallback, live notifications, pool resolution and historical sell/peak calculations without RPC access. It does not install or run the browser extension.
+
 ```bash
 npm test                          # full test suite, real mainnet fixtures, offline
 node cli/scan.mjs <mint-or-pair>  # the same engine in your terminal (--json out.json, --rpc URL)
