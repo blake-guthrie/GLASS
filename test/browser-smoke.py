@@ -83,16 +83,21 @@ class Driver:
                 '--headless=new', '--no-sandbox', '--disable-dev-shm-usage', '--no-first-run',
                 '--disable-background-networking', f'--disable-extensions-except={extension}', f'--load-extension={extension}',
             ]}})
-        reply = self.raw('POST', '/session', {'capabilities': {'alwaysMatch': common}})
+        # Session creation includes launching the browser and its automation
+        # listener. A hosted run needed 26s just to reach the TLS-ready log;
+        # allow 60s for that handshake, without changing any extension deadline.
+        started = time.monotonic()
+        reply = self.raw('POST', '/session', {'capabilities': {'alwaysMatch': common}}, timeout=60)
+        results.setdefault('session_start_seconds', []).append({'browser': kind, 'seconds': round(time.monotonic() - started, 3)})
         self.session = reply['sessionId']
         results['browsers'][kind] = reply['capabilities']
         self.call('POST', '/timeouts', {'script': 20000, 'pageLoad': 20000, 'implicit': 0})
 
-    def raw(self, method, endpoint, payload=None):
+    def raw(self, method, endpoint, payload=None, timeout=30):
         data = None if payload is None else json.dumps(payload).encode()
         req = urllib.request.Request(self.url + endpoint, data=data, method=method, headers={'Content-Type': 'application/json'})
         try:
-            with urllib.request.urlopen(req, timeout=30) as response:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
                 result = json.load(response)
         except urllib.error.HTTPError as error:
             raise RuntimeError(f'{method} {endpoint}: {error.read().decode()}') from error
