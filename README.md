@@ -20,7 +20,7 @@
 
 Every terminal tells you **"bundled 23%"**. GLASS tells you *whose* bundle it is, whether that dev has ever let a coin run, and whether they're selling right now.
 
-GLASS is a free, open-source Chrome extension. Open a token on **pump.fun, Axiom, Photon, BullX, GMGN, DexScreener, Padre, Birdeye or Solscan** and the panel appears with the full picture. You don't copy the contract address, open a new tab, or paste anything.
+GLASS is a free, open-source Chrome and Firefox extension. Open a token on **pump.fun, Axiom, Photon, BullX, GMGN, DexScreener, Padre, Birdeye or Solscan** and the panel appears with the full picture. You don't copy the contract address, open a new tab, or paste anything.
 
 <p align="center">
   <img src="docs/screenshots/01-panel-pumpfun.png" alt="GLASS panel on a live pump.fun launch" />
@@ -62,7 +62,7 @@ GLASS is a free, open-source Chrome extension. Open a token on **pump.fun, Axiom
       <img src="docs/screenshots/05-coordination-wallets.png" alt="Coordination and launch wallets" />
       <p><b>Coordination and launch wallets.</b> Shared transaction fingerprints, Jito bundles and fee wallets, plus how and by whom each launch wallet was funded.</p>
       <img src="docs/screenshots/07-settings.png" width="300" alt="GLASS settings" />
-      <p><b>Settings.</b> Click the GLASS icon in Chrome's toolbar to choose your RPC, add a free Helius key, adjust scan depth, or export and wipe GLASS's memory.</p>
+      <p><b>Settings.</b> Click the GLASS icon in the browser toolbar to choose your RPC, add a free Helius key, adjust scan depth, or export and wipe GLASS's memory.</p>
     </td>
   </tr>
 </table>
@@ -104,6 +104,31 @@ Launch tools now fund their wallets through exchanges, fee-payers and closed WSO
 **Updating:** unzip over the old folder, press ↻ on the GLASS card in `chrome://extensions`, then reload the terminal tab.
 
 *Chrome Web Store listing: coming soon.*
+
+### Firefox (desktop 128 or later)
+
+Build with Node 22+: `npm run pack:firefox` (no dependency install required).
+Open `about:debugging#/runtime/this-firefox`, choose **Load Temporary Add-on**, and select
+`dist/firefox/manifest.json` or `dist/glass-extension-0.3.2-firefox.zip`. Allow access to the
+supported terminal sites when Firefox asks, then reload the token page. Click GLASS in
+Firefox's Extensions menu to open settings. Custom RPC URLs must use HTTPS; **Save** and
+**Test RPC** ask for access to that specific host. Denying access leaves settings unchanged.
+
+This is an unsigned development build: temporary add-ons disappear when Firefox restarts.
+For updates, rebuild, click **Reload** on GLASS in `about:debugging`, and reload terminal tabs.
+Normal persistent installation needs a Mozilla-signed release; this repository's build command
+does not sign or publish an add-on. Settings and cached reports survive background restarts;
+scans in progress are restarted/rejoined by the panel if its background connection closes.
+For background errors, use GLASS's **Inspect** button in `about:debugging`.
+
+The root manifest remains the Chrome 110+ service-worker manifest. Firefox packaging overlays
+`manifest.firefox.json`, uses an ES-module event page, and removes `minimum_chrome_version`.
+Firefox 128 is the minimum because that is when
+[`optional_host_permissions`](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json/optional_host_permissions)
+became available. The separate manifests avoid the
+[Chrome-before-121 rejection of MV3 background scripts](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json/background).
+Both builds use the same scanner source and request the same host access.
+
 
 ---
 
@@ -210,7 +235,9 @@ Every request goes to the RPC you chose (or the built-in fallbacks `solana-rpc.p
 ```bash
 npm test                          # full test suite, real mainnet fixtures, offline
 node cli/scan.mjs <mint-or-pair>  # the same engine in your terminal (--json out.json, --rpc URL)
-node cli/pack.mjs                 # builds dist/glass-extension-<version>.zip
+node cli/pack.mjs                 # Chrome ZIP and dist/chrome/
+node cli/pack.mjs firefox         # Firefox ZIP and dist/firefox/
+node cli/pack.mjs all             # both, deterministic ZIPs (no system zip tool needed)
 ```
 
 | Path | What it is |
@@ -226,3 +253,20 @@ node cli/pack.mjs                 # builds dist/glass-extension-<version>.zip
 ## License
 
 [MIT](LICENSE). Use it, fork it, build on it.
+
+### Browser regression checks
+
+`npm test` includes API and background-port lifetime regressions. The existing scanner tests
+remain offline. `python3 test/package-check.py` checks both built archives with an independent
+ZIP reader, exact source contents and a byte-for-byte rebuild.
+
+`python3 test/browser-smoke.py` requires preinstalled Firefox/geckodriver, Chromium/chromedriver,
+Python 3 and OpenSSL on Linux. Run it inside a network namespace with only loopback enabled
+(the script checks that isolation before launching browsers). It uses new temporary profiles,
+loads the real generated Firefox package, tests popup persistence/messages, then loads a
+fixture copy whose only changes are a test background bootstrap and test files. Every production
+source file is checked against the package. The unchanged scanner runs against synthetic fetch
+and WebSocket responses; a local HTTPS pump.fun page exercises the actual content script.
+It also checks Chromium's service-worker build. Runtime versions and results are written to
+`test-results/browser-results.json`; these fixtures do not establish live RPC availability,
+Firefox signing, mobile support, or runtime coverage of every version back to the minimum.

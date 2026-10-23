@@ -1,0 +1,12 @@
+{
+  "background": {
+    "scripts": ["src/background.js"],
+    "type": "module"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "glass-launch-scanner@blake-guthrie.github.io",
+      "strict_min_version": "128.0"
+    }
+  }
+}

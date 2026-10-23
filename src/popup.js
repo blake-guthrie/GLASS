@@ -1,3 +1,4 @@
+import { api, backgroundHelp, requestRpcPermission } from './lib/webext.js';
 import { DEFAULTS } from './lib/constants.js';
 
 const $ = (id) => document.getElementById(id);
@@ -5,7 +6,7 @@ const fields = ['rpcUrl', 'slotWindow', 'earlyWindowSec', 'maxWalletProfiles', '
 const checks = ['enabled', 'operatorHistory', 'liveTracking', 'jitoLookup'];
 
 async function load() {
-  const r = await chrome.storage.sync.get('settings');
+  const r = await api.storage.sync.get('settings');
   const s = { enabled: true, ...DEFAULTS, ...(r?.settings || {}) };
   for (const f of fields) $(f).value = s[f] ?? '';
   for (const c of checks) $(c).checked = s[c] !== false;
@@ -22,25 +23,13 @@ function collect() {
   return s;
 }
 
-async function ensureHostPermission(url) {
-  let origin;
-  try {
-    origin = new URL(url).origin + '/*';
-  } catch {
-    return false;
-  }
-  const have = await chrome.permissions.contains({ origins: [origin] });
-  if (have) return true;
-  return chrome.permissions.request({ origins: [origin] });
-}
-
 $('save').addEventListener('click', async () => {
   const s = collect();
-  if (s.rpcUrl && !(await ensureHostPermission(s.rpcUrl))) {
+  if (s.rpcUrl && !(await requestRpcPermission(s.rpcUrl))) {
     status('saved', 'Permission for that RPC host was not granted.', 'bad');
     return;
   }
-  await chrome.storage.sync.set({ settings: s });
+  await api.storage.sync.set({ settings: s });
   status('saved', 'Saved', 'ok');
   setTimeout(() => status('saved', ''), 1500);
 });
@@ -55,23 +44,23 @@ $('useHelius').addEventListener('click', () => {
 $('testRpc').addEventListener('click', async () => {
   const url = $('rpcUrl').value.trim() || DEFAULTS.rpcUrl;
   status('rpcStatus', 'testing…');
-  if (!(await ensureHostPermission(url))) return status('rpcStatus', 'host permission denied', 'bad');
-  const r = await chrome.runtime.sendMessage({ type: 'testRpc', url });
+  if (!(await requestRpcPermission(url))) return status('rpcStatus', 'host permission denied', 'bad');
+  const r = await api.runtime.sendMessage({ type: 'testRpc', url });
   if (r?.ok) status('rpcStatus', `ok · ${r.profile} · slot ${r.slot} · ${r.ms}ms · getBlock ${r.getBlock ? 'yes' : 'no'}${r.indexed === false ? ' · token-account queries via ATA' : ''}`, 'ok');
   else status('rpcStatus', `failed: ${r?.error || 'unknown'}`, 'bad');
 });
 
 $('clearCache').addEventListener('click', async () => {
-  await chrome.runtime.sendMessage({ type: 'clearCache' });
+  await api.runtime.sendMessage({ type: 'clearCache' });
   refreshStats();
 });
 $('clearMemory').addEventListener('click', async () => {
   if (!confirm('Wipe the local operator memory (wallet ↔ launch index)?')) return;
-  await chrome.runtime.sendMessage({ type: 'clearMemory' });
+  await api.runtime.sendMessage({ type: 'clearMemory' });
   refreshStats();
 });
 $('exportMemory').addEventListener('click', async () => {
-  const data = await chrome.runtime.sendMessage({ type: 'exportMemory' });
+  const data = await api.runtime.sendMessage({ type: 'exportMemory' });
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -81,9 +70,9 @@ $('exportMemory').addEventListener('click', async () => {
 });
 
 async function refreshStats() {
-  const r = await chrome.runtime.sendMessage({ type: 'stats' }).catch(() => null);
+  const r = await api.runtime.sendMessage({ type: 'stats' }).catch(() => null);
   if (!r || r.error) {
-    $('stats').textContent = 'Background worker not responding — open chrome://extensions → GLASS → "Errors" / "service worker" to see why.';
+    $('stats').textContent = `Background not responding. ${backgroundHelp}`;
     $('stats').style.color = '#ff8a94';
     return;
   }

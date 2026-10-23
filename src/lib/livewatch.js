@@ -61,6 +61,7 @@ export class LiveWatcher {
     this.closed = false;
     this.retries = 0;
     this.pingTimer = null;
+    this.reconnectTimer = null;
   }
   async start() {
     const { wsUrl, mint, tokenProgram = PROGRAMS.TOKEN, wallets, curve } = this.o;
@@ -81,6 +82,7 @@ export class LiveWatcher {
     }
     this.ws = ws;
     ws.onopen = () => {
+      if (this.closed || this.ws !== ws) return;
       this.retries = 0;
       this.o.onStatus?.({ state: 'open', subs: this.atas.length + (this.curve ? 1 : 0) });
       for (const a of this.atas) this.subscribe(a.ata, { kind: 'ata', wallet: a.wallet, walletKind: a.kind }, 'jsonParsed');
@@ -95,16 +97,19 @@ export class LiveWatcher {
         }
       }, 25_000);
     };
-    ws.onmessage = (m) => this.onMessage(m);
+    ws.onmessage = (m) => {
+      if (!this.closed && this.ws === ws) this.onMessage(m);
+    };
     ws.onerror = () => {};
     ws.onclose = () => {
+      if (this.ws !== ws) return;
       clearInterval(this.pingTimer);
       this.subs.clear();
       this.pending.clear();
       if (this.closed) return;
       const wait = Math.min(30_000, 1000 * 2 ** this.retries++);
       this.o.onStatus?.({ state: 'reconnecting', inMs: wait });
-      setTimeout(() => this.connect(), wait);
+      this.reconnectTimer = setTimeout(() => this.connect(), wait);
     };
   }
   subscribe(account, meta, encoding) {
@@ -152,6 +157,9 @@ export class LiveWatcher {
   stop() {
     this.closed = true;
     clearInterval(this.pingTimer);
+    clearTimeout(this.reconnectTimer);
+    this.subs.clear();
+    this.pending.clear();
     try {
       this.ws?.close();
     } catch {
