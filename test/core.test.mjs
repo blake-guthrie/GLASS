@@ -7,6 +7,7 @@ import { isOnCurve, findProgramAddress } from '../src/lib/pda.js';
 import { PUMP_IX, PROGRAMS, JITO_TIP_ACCOUNTS } from '../src/lib/constants.js';
 import { parseTx, txInitialisesMint, classifyForMint, decodePumpIx } from '../src/lib/txparse.js';
 import { derivePumpAccounts, extractLaunchEvents } from '../src/lib/scan/launch.js';
+import { quoteToUsdMultiplier } from '../src/lib/market.js';
 
 const fx = JSON.parse(fs.readFileSync(new URL('./fixtures/pump-txs.json', import.meta.url), 'utf8'));
 
@@ -129,4 +130,43 @@ test('extractLaunchEvents: dev buy in the create tx is flagged as creator', () =
   assert.ok(dev && dev.isCreator && dev.inCreateTx && dev.side === 'buy');
   assert.ok(dev.sol > 0);
   assert.equal(dev.slotOffset, 0);
+});
+
+test('extractLaunchEvents uses USDC decimals and preserves the USD quote', () => {
+  const rec = {
+    err: null,
+    sig: 'usdc-trade',
+    slot: 10,
+    blockTime: 100,
+    order: 1,
+    feePayer: fx.creator,
+    systemTransfers: [],
+    pumpIxs: [{ user: fx.creator, quoteMint: PROGRAMS.USDC, name: 'buy_v3' }],
+    pumpEvents: [
+      {
+        type: 'trade',
+        mint: fx.mint,
+        user: fx.creator,
+        isBuy: true,
+        quoteAmountRaw: 1_500_000n,
+        tokenAmountRaw: 60_000_000n,
+        virtualQuoteReservesRaw: 12_500_000_000n,
+        virtualTokenReservesRaw: 500_000_000_000n,
+      },
+    ],
+  };
+  const creation = { record: { ...rec, sig: 'create' }, bondingCurve: fx.bondingCurve };
+  const [event] = extractLaunchEvents([rec], fx.mint, creation);
+  assert.equal(event.quoteMint, PROGRAMS.USDC);
+  assert.equal(event.quoteSymbol, 'USDC');
+  assert.equal(event.quoteAmount, 1.5);
+  assert.equal(event.tokens, 60);
+  assert.equal(event.priceQuote, 0.025);
+  assert.equal(quoteToUsdMultiplier(event.quoteMint, 250), 1);
+});
+
+test('quoteToUsdMultiplier prices SOL quotes and rejects unknown quote assets', () => {
+  assert.equal(quoteToUsdMultiplier(PROGRAMS.WSOL, 250), 250);
+  assert.equal(quoteToUsdMultiplier(null, 250), 250);
+  assert.equal(quoteToUsdMultiplier('unknown', 250), null);
 });

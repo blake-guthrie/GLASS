@@ -42,22 +42,53 @@ export function decodePumpEvent(ix) {
   try {
     if (name === 'TradeEvent') {
       const mint = pk();
-      const quoteAmount = Number(u64()) / LAMPORTS_PER_SOL;
-      const tokenAmount = Number(u64()) / 1e6;
+      // TradeEvent does not identify the quote mint. Preserve raw values so the
+      // matching instruction can apply the quote asset's decimals later.
+      const quoteAmountRaw = Number(u64());
+      const tokenAmountRaw = Number(u64());
+      const quoteAmount = quoteAmountRaw / LAMPORTS_PER_SOL;
+      const tokenAmount = tokenAmountRaw / 1e6;
       const isBuy = d[o++] === 1;
       const user = pk();
       const timestamp = Number(u64());
-      const vSol = Number(u64()) / LAMPORTS_PER_SOL;
-      const vTok = Number(u64()) / 1e6;
-      const rSol = Number(u64()) / LAMPORTS_PER_SOL;
-      const rTok = Number(u64()) / 1e6;
+      const virtualQuoteReservesRaw = Number(u64());
+      const virtualTokenReservesRaw = Number(u64());
+      const realQuoteReservesRaw = Number(u64());
+      const realTokenReservesRaw = Number(u64());
+      const vSol = virtualQuoteReservesRaw / LAMPORTS_PER_SOL;
+      const vTok = virtualTokenReservesRaw / 1e6;
+      const rSol = realQuoteReservesRaw / LAMPORTS_PER_SOL;
+      const rTok = realTokenReservesRaw / 1e6;
       const feeRecipient = pk();
       o += 8; // fee_basis_points
       const fee = Number(u64()) / LAMPORTS_PER_SOL;
       const creator = pk();
       o += 8; // creator_fee_basis_points
       const creatorFee = Number(u64()) / LAMPORTS_PER_SOL;
-      return { type: 'trade', mint, quoteAmount, tokenAmount, isBuy, user, timestamp, vSol, vTok, rSol, rTok, feeRecipient, fee, creator, creatorFee, priceQuote: vTok > 0 ? vSol / vTok : null };
+      return {
+        type: 'trade',
+        mint,
+        quoteAmountRaw,
+        tokenAmountRaw,
+        virtualQuoteReservesRaw,
+        virtualTokenReservesRaw,
+        realQuoteReservesRaw,
+        realTokenReservesRaw,
+        quoteAmount,
+        tokenAmount,
+        isBuy,
+        user,
+        timestamp,
+        vSol,
+        vTok,
+        rSol,
+        rTok,
+        feeRecipient,
+        fee,
+        creator,
+        creatorFee,
+        priceQuote: vTok > 0 ? vSol / vTok : null,
+      };
     }
     if (name === 'CreateEvent') {
       const tokenName = str();
