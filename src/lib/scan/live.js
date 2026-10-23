@@ -45,7 +45,7 @@ export async function trackCluster(rpc, mint, cluster, { launchTimeSec, supply, 
         if (!rec || rec.err) return;
         const c = classifyForMint(rec, mint, wallet);
         if (!c.side) return;
-        const ev = { wallet, sig: rec.sig, slot: rec.slot, t: rec.blockTime ? rec.blockTime * 1000 : null, side: c.side, tokens: c.tokens, sol: c.sol };
+        const ev = { wallet, sig: rec.sig, slot: rec.slot, t: rec.blockTime ? rec.blockTime * 1000 : null, side: c.side, tokens: c.tokens, sol: c.sol, quoteMint: c.quoteMint, quoteAmount: c.quoteAmount };
         // price at the time, from the program's own trade event when present
         const te = (rec.pumpEvents || []).find((e) => e.type === 'trade' && e.mint === mint);
         if (te?.priceQuote) ev.priceQuote = te.priceQuote;
@@ -81,7 +81,7 @@ export async function trackCluster(rpc, mint, cluster, { launchTimeSec, supply, 
     while (j < sells.length && sells[j].t - sells[i].t <= 10_000) {
       ws.add(sells[j].wallet);
       tokens += sells[j].tokens;
-      sol += sells[j].sol;
+      sol = sol == null || sells[j].sol == null ? null : sol + sells[j].sol;
       j++;
     }
     if (ws.size >= 2) exitEvents.push({ at: sells[i].t, wallets: ws.size, tokens, sol, pct: supply ? (tokens / supply) * 100 : null, minutesAfterLaunch: Math.round((sells[i].t / 1000 - launchTimeSec) / 60) });
@@ -108,7 +108,7 @@ export async function trackCluster(rpc, mint, cluster, { launchTimeSec, supply, 
   const firstSell = sells[0] || null;
   const tenMinAgo = Date.now() - 10 * 60 * 1000;
   const recentSells = sells.filter((s) => s.t >= tenMinAgo);
-  const soldSol = sells.reduce((s, x) => s + (x.sol || 0), 0);
+  const soldSol = sells.some((x) => x.sol == null) ? null : sells.reduce((s, x) => s + x.sol, 0);
 
   return {
     holdings,
