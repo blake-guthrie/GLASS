@@ -131,6 +131,8 @@ class Driver:
         if self.session:
             try:
                 self.call('DELETE', '')
+            except RuntimeError as error:
+                results.setdefault('cleanup_errors', []).append(str(error))
             finally:
                 self.session = None
         self.proc.terminate()
@@ -314,6 +316,9 @@ def main():
             popup = f'moz-extension://{UUID}/src/popup.html'
             popup_checks(firefox, popup, permission_test=True)
             copy = fixture_copy('firefox', temp)
+            # Updating the add-on closes its pages. Keep a normal tab open so
+            # Firefox does not quit when the sole extension tab disappears.
+            firefox.navigate('about:blank')
             firefox.call('POST', '/moz/addon/install', {'path': str(copy), 'temporary': True})
             fixture_checks(firefox, popup)
         finally:
