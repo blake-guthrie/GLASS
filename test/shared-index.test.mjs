@@ -55,6 +55,8 @@ test('captured launch: feed → actual seven-stage engine → durable index → 
   assert.equal(snapshotReport(hit).sharedIndex.origin,base.slice(0,-1));assert.equal(snapshotReport(hit).launch,undefined);
   assert.equal((await originalFetch(`${base}v1/status`)).status,200);
   assert.equal((await originalFetch(`${base}v1/reports/${address(30)}`)).status,404);
+  store.state.jobs[address(31)]={mint:address(31),status:'unsupported-quote',reason:'engine-requires-SOL-quote'};
+  const blocked=await originalFetch(`${base}v1/reports/${address(31)}`);assert.equal(blocked.status,202);assert.equal((await blocked.json()).reason,'engine-requires-SOL-quote');
   assert.equal((await originalFetch(`${base}v1/reports/${captured.mint}`,{method:'POST',body:'bad'})).status,405);
   assert.ok(requested.every((u)=>!u.includes('DO-NOT-UPLOAD')));
   await store.close();const again=await new WorkerStore(store.directory).open();t.after(()=>again.close());
@@ -128,4 +130,6 @@ test('popup requests all optional hosts synchronously in the user gesture, then 
   await new Promise((r)=>setImmediate(r));for(const n of nodes.values())n.value=String(n.value);active=true;const promise=node('save').click();active=false;await promise;
   assert.ok(requested.includes('https://index.invalid/*'));assert.ok(requested.includes(new URL(DEFAULTS.rpcUrl).origin+'/*'));
   assert.equal(saved.settings.sharedIndexEnabled,true);assert.equal(saved.settings.sharedIndexUrl,'https://index.invalid');
+  node('sharedIndexUrl').value='http://127.0.0.1:8788/';active=true;const local=node('save').click();active=false;await local;
+  assert.ok(requested.includes('http://127.0.0.1/*'));
 });

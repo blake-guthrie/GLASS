@@ -25,9 +25,9 @@ function collect() {
 
 function ensureHostPermission(...urls) {
   try {
-    const origins = [...new Set(urls.map((url) => new URL(url).origin + '/*'))];
+    const origins = [...new Set(urls.map((url) => { const u = new URL(url); return `${u.protocol}//${u.hostname}/*`; }))];
     // Invoke request in the click gesture, before any await (including contains).
-    return chrome.permissions.request({ origins });
+    return chrome.permissions.request({ origins }).catch(() => false);
   } catch {
     return Promise.resolve(false);
   }
