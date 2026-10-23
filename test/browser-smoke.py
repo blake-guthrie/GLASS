@@ -56,7 +56,12 @@ class Driver:
         number = len(list(OUT.glob(f'{kind}-driver-*.log'))) + 1
         self.log = (OUT / f'{kind}-driver-{number}.log').open('w')
         name = 'geckodriver' if kind == 'firefox' else 'chromedriver'
-        self.proc = subprocess.Popen([shutil.which(name), '--port', str(self.port)], stdout=self.log, stderr=subprocess.STDOUT)
+        command = [shutil.which(name), '--port', str(self.port)]
+        if kind == 'firefox':
+            # Mozilla's geckodriver flag, not a Firefox capability argument.
+            # Needed only to operate this isolated profile's host-permission prompt.
+            command.append('--allow-system-access')
+        self.proc = subprocess.Popen(command, stdout=self.log, stderr=subprocess.STDOUT)
         def ready():
             try:
                 return self.raw('GET', '/status')
@@ -66,7 +71,7 @@ class Driver:
         common = {'acceptInsecureCerts': True}
         if kind == 'firefox':
             common.update({'browserName': 'firefox', 'moz:firefoxOptions': {
-                'args': ['-headless', '--remote-allow-system-access'],
+                'args': ['-headless'],
                 'prefs': {'extensions.webextensions.uuids': json.dumps({ID: UUID}),
                           'browser.shell.checkDefaultBrowser': False, 'browser.startup.page': 0,
                           'datareporting.policy.dataSubmissionEnabled': False},
