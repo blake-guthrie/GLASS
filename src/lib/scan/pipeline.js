@@ -345,7 +345,8 @@ export async function runScan(rpc, identifier, opts = {}) {
       const [sn, fe, fu, dv, fp] = await Promise.all([opts.memory.getReps('sniper', snipers), opts.memory.getReps('fee', fees), opts.memory.getReps('funder', funders), opts.memory.getReps('dev', [creator]), opts.memory.getReps('fp', fpKey)]);
       const pack = (m) =>
         Object.entries(m)
-          .map(([wallet, r]) => ({ wallet, seen: r.seen, avoid: r.levels?.avoid || 0, caution: r.levels?.caution || 0, lastSeen: r.lastSeen }))
+          .map(([wallet, r]) => ({ wallet, seen: Math.max(0, (r.seen || 0) - (r.mints?.includes(report.mint) ? 1 : 0)), avoid: r.levels?.avoid || 0, caution: r.levels?.caution || 0, lastSeen: r.lastSeen }))
+          .filter((x) => x.seen > 0)
           .sort((a, b) => b.seen - a.seen);
       report.reputation = { snipers: pack(sn), feeWallets: pack(fe), funders: pack(fu), dev: pack(dv)[0] || null, fingerprint: pack(fp)[0] || null };
     } catch (e) {

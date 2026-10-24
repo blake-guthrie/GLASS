@@ -1,6 +1,6 @@
 {
   "name": "glass-extension",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "GLASS \u2014 open-source launch transparency for Solana memecoins. Browser extension + scan engine.",
   "type": "module",
   "private": true,

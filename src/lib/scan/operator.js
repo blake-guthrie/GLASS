@@ -505,7 +505,7 @@ export function rateOperator(launches, current = {}) {
     const p = profile;
     const cnt = `${p.totalCreated.toLocaleString()}${p.atLeast ? '+' : ''}`;
     const since = p.firstCreatedAt ? ` since ${new Date(p.firstCreatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: p.spanDays > 300 ? 'numeric' : undefined })}` : '';
-    const rate = p.perDay != null && p.totalCreated >= 5 ? (p.perDay >= 1 ? ` (≈${Math.round(p.perDay)} per day)` : p.perDay * 7 >= 1 ? ` (≈${Math.round(p.perDay * 7)} per week)` : '') : '';
+    const rate = p.perDay != null && p.totalCreated >= 5 ? (p.perDay >= 1 ? ` (≈${Math.round(p.perDay)} per day${p.perDayRecent ? ' lately' : ''})` : p.perDay * 7 >= 1 ? ` (≈${Math.round(p.perDay * 7)} per week${p.perDayRecent ? ' lately' : ''})` : '') : '';
     r.push(`This creator wallet has launched ${cnt} token${p.totalCreated === 1 ? '' : 's'} on pump.fun${since}${rate}${p.last24hAtLeast ? `, ${p.last24h}+ in the last 24 h` : p.last24h >= 3 ? `, ${p.last24h} in the last 24 h` : ''}`);
     const st = p.stats || {};
     if (farm) r.push(`Token farm: ${Math.round((st.deadRate || 0) * 100)}% of their tokens never traded above $10k (the dev buy was the top), ${Math.round((st.ranRate || 0) * 100)}% ever ran past $30k. The pattern is mint → sell the dev bag into whoever buys → next token.`);
@@ -565,6 +565,8 @@ export function profileSummary(p) {
     lastCreatedAt: p.lastCreatedAt,
     spanDays: p.spanDays,
     perDay: p.perDay,
+    perDayRecent: p.perDayRecent,
+    countCapped: p.countCapped,
     last24h: p.last24h,
     last24hAtLeast: p.last24hAtLeast,
     last7d: p.last7d,

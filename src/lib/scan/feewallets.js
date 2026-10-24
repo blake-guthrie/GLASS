@@ -63,7 +63,7 @@ export async function annotateFeeWallets(rpc, analysis, { memory, max = 3 } = {}
     f.mintsSeen = c.mints;
     f.perMinute = c.perMinute;
     f.flatFee = c.flatFee;
-    f.label = c.label || (c.platform ? 'trading bot / terminal fee account (many unrelated traders pay it)' : c.payers != null ? `only ${c.payers} payer(s) across ${c.mints} token(s) in its recent history — private launch-tool or operator fee wallet` : 'unclassified fee wallet');
+    f.label = c.label || (c.platform ? 'trading bot / terminal fee account (many unrelated traders pay it)' : c.payers != null ? `only ${c.payers} payer${c.payers === 1 ? '' : 's'} in its recent history${c.mints ? `, across ${c.mints} token${c.mints === 1 ? '' : 's'}` : ''} — private launch-tool or operator fee wallet` : 'unclassified fee wallet');
   }
   return list;
 }

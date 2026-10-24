@@ -111,6 +111,9 @@ th, td { text-align: left; padding: 3px 4px; border-bottom: 1px solid #171b25; w
 .tscroll::-webkit-scrollbar { height: 6px; } .tscroll::-webkit-scrollbar-thumb { background: #262b36; border-radius: 6px; }
 .op-table th, .op-table td { padding: 3px 3px; font-size: 11px; }
 .op-table td.sold { white-space: normal; max-width: 70px; line-height: 1.2; }
+.op-table td.pl { white-space: normal; max-width: 108px; line-height: 1.25; }
+.op-table .sym { display: block; max-width: 108px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.op-table .pls { display: block; font-size: 10px; color: #8b93a5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 108px; }
 tr.how td { white-space: normal !important; }
 th { color: #8b93a5; font-weight: 600; } td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 a { color: #8ec5ff; text-decoration: none; } a:hover { text-decoration: underline; }
@@ -350,7 +353,7 @@ tr.how td { border-bottom: 1px solid #171b25; }
       rows.push(`<span class="k" title="Jito tips are paid to land a transaction in a bundle (a group of transactions executed together, in order). Identical tips across wallets = one sender.">Jito tipped</span><span class="v">${j.tippedCount}/${n}${j.tippedCount ? ` · identical tip ${Math.round(j.identicalTipShare * 100)}%` : ''}</span>`);
       rows.push(`<span class="k" title="A Jito bundle is a group of transactions submitted together. Several launch buys in ONE bundle = one operator sent them">Jito bundles</span><span class="v">${j.confirmedMultiTxBundles != null ? (j.confirmedMultiTxBundles ? `<span class="bad">${j.confirmedMultiTxBundles} with multiple launch buys</span>` : 'none shared between buyers') : `${j.inferredBundles.length} inferred`}${j.bundleIds?.length ? ` <span class="muted">(${j.bundleIds.length} tipped tx${j.bundleIds.length === 1 ? '' : 's'} checked)</span>` : ''}</span>`);
       for (const x of L.sharedFeeRecipients || []) {
-        const who = x.platform ? `<span class="muted">bot/terminal fee account — ${x.payersSeen ?? '?'} different traders paid it in its last ${x.mintsSeen ? `${x.mintsSeen}-token` : 'few'} stretch${x.perMinute ? `, ~${x.perMinute}/min` : ''}. Means "these wallets used the same popular bot", not "same operator".</span>` : x.payersSeen != null ? `<span class="bad">private fee wallet — only ${x.payersSeen} payer(s) across ${x.mintsSeen} token(s) recently: a launch tool's or the operator's own fee account</span>` : '<span class="muted">unclassified</span>';
+        const who = x.platform ? `<span class="muted">bot/terminal fee account — ${x.payersSeen ?? '?'} different traders paid it in its last ${x.mintsSeen ? `${x.mintsSeen}-token` : 'few'} stretch${x.perMinute ? `, ~${x.perMinute}/min` : ''}. Means "these wallets used the same popular bot", not "same operator".</span>` : x.payersSeen != null ? `<span class="bad">private fee wallet — only ${x.payersSeen} payer${x.payersSeen === 1 ? '' : 's'} in its recent transactions${x.mintsSeen ? `, across ${x.mintsSeen} token${x.mintsSeen === 1 ? '' : 's'}` : ''}: a launch tool's or the operator's own fee account</span>` : '<span class="muted">unclassified</span>';
         rows.push(`<span class="k" title="pump.fun's protocol fee is paid inside the program. A separate SOL transfer from the buyer to some other wallet in the same transaction is a fee the buyer's software added — a trading bot, a terminal, or a launch tool.">Extra fee wallet</span><span class="v" style="white-space:normal;text-align:left">${link(x.address)} · paid by ${x.wallets.length} of the launch buyers (${x.wallets.slice(0, 4).map((w) => link(w)).join(', ')}${x.wallets.length > 4 ? ` +${x.wallets.length - 4}` : ''})<br>${who}</span>`);
       }
       if (L.sharedPayers?.length) rows.push(`<span class="k" title="The wallet that signed as fee payer for another wallet's buy. One wallet paying for several buyers' transactions = one operator.">Shared fee payer</span><span class="v">${L.sharedPayers.map((x) => `${link(x.address)} paid for ${x.wallets.length}`).join(', ')}</span>`);
@@ -423,14 +426,14 @@ tr.how td { border-bottom: 1px solid #171b25; }
       const clusterTable = clusterRows.length ? `<div class="note" style="margin-top:6px"><b>Cluster wallets</b> <span class="muted">· ${holdings.length} tracked${ls?.status?.state === 'open' ? ' · <span class="live-dot"></span>live' : ''}</span></div><div class="tscroll"><table><tr><th>wallet</th><th class="num">bought</th><th class="num">holds</th><th>status</th></tr>${clusterRows.join('')}</table></div>` : '';
       const feed = this.activityFeed(r);
       const reps = [];
-      const snR = r.reputation?.snipers || [];
+      const snR = (r.reputation?.snipers || []).filter((x) => x.seen > 0);
       if (snR.length) {
         const top = snR[0];
         reps.push(`${snR.length} of these sniper bots showed up on launches you scanned before (${link(top.wallet)}: ${top.seen}×${top.avoid ? `, ${top.avoid} rated Avoid` : ''})`);
       }
-      const feR = (r.reputation?.feeWallets || []).filter((x) => !(r.launch?.sharedFeeRecipients || []).find((f) => f.address === x.wallet && f.platform));
+      const feR = (r.reputation?.feeWallets || []).filter((x) => x.seen > 0 && !(r.launch?.sharedFeeRecipients || []).find((f) => f.address === x.wallet && f.platform));
       if (feR.length) reps.push(`fee wallet ${link(feR[0].wallet)} collected on ${feR[0].seen} earlier launch${feR[0].seen === 1 ? '' : 'es'} you scanned${feR[0].avoid ? ` (${feR[0].avoid} rated Avoid)` : ''}`);
-      const fuR = r.reputation?.funders || [];
+      const fuR = (r.reputation?.funders || []).filter((x) => x.seen > 0);
       if (fuR.length) reps.push(`funder ${link(fuR[0].wallet)} funded buyers on ${fuR[0].seen} earlier launch${fuR[0].seen === 1 ? '' : 'es'} you scanned${fuR[0].avoid ? ` (${fuR[0].avoid} rated Avoid)` : ''}`);
       const repHtml = reps.length ? `<div class="rep">${reps.map((x) => `· ${x}`).join('<br>')}</div>` : '';
       const sub = s.dumpingNow ? '<span class="bad">selling now</span>' : `holds ${fmtPct(holdsPct)}`;
@@ -481,7 +484,7 @@ tr.how td { border-bottom: 1px solid #171b25; }
       const kind = p.archetype?.kind;
       const chip = kind === 'farm' ? '<span class="pill bear">token farm</span>' : kind === 'serial' ? '<span class="pill mix">serial launcher</span>' : kind === 'first' ? '<span class="pill na">first launch</span>' : '';
       const since = p.firstCreatedAt ? `since ${new Date(p.firstCreatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : '';
-      const rate = p.perDay != null && n >= 5 ? (p.perDay >= 1 ? `≈${Math.round(p.perDay)}/day` : p.perDay * 7 >= 1 ? `≈${Math.round(p.perDay * 7)}/week` : '') : '';
+      const rate = p.perDay != null && n >= 5 ? (p.perDay >= 1 ? `≈${Math.round(p.perDay)}/day${p.perDayRecent ? ' lately' : ''}` : p.perDay * 7 >= 1 ? `≈${Math.round(p.perDay * 7)}/week${p.perDayRecent ? ' lately' : ''}` : '') : '';
       const st = p.stats || {};
       const bits = [];
       if (st.n) bits.push(`<span title="Share of their launches that reached graduation (~$69k)">${Math.round((st.graduationRate || 0) * 100)}% graduated</span>`);
@@ -489,7 +492,7 @@ tr.how td { border-bottom: 1px solid #171b25; }
       if (st.best?.athMcapUsd) bits.push(`<span title="Their best launch ever">best ${fmtUsd(st.best.athMcapUsd)}${st.best.symbol ? ` ($${esc(st.best.symbol)})` : ''}</span>`);
       if (st.n && st.deadRate != null) bits.push(`<span title="Share of launches that never traded above $10k — the dev buy + bots was the top">${Math.round(st.deadRate * 100)}% never ran</span>`);
       if (st.n && st.ranRate != null) bits.push(`<span title="Share of launches that reached at least $30k market cap">${Math.round(st.ranRate * 100)}% ran past $30k</span>`);
-      return `<div class="devline"><span class="big">${n.toLocaleString()}${p.atLeast ? '+' : ''} token${n === 1 ? '' : 's'}</span><span class="muted">launched by this wallet${since ? ` ${since}` : ''}${rate ? ` · ${rate}` : ''}${p.last24hAtLeast ? ` · ${p.last24h}+ in 24h` : p.last24h >= 3 ? ` · ${p.last24h} in 24h` : ''}</span>${chip}</div>${bits.length ? `<div class="leg" style="margin-bottom:6px">${bits.join('<span class="muted">·</span>')}</div>` : ''}`;
+      return `<div class="devline"><span class="big"${p.countCapped ? ` title="pump.fun's public API lists at most 1,001 coins from each end of a wallet's history, so past 2,002 GLASS can only prove a lower bound. Terminals with their own indexer may show the full count."` : ''}>${n.toLocaleString()}${p.atLeast ? '+' : ''} token${n === 1 ? '' : 's'}</span><span class="muted">launched by this wallet${since ? ` ${since}` : ''}${rate ? ` · ${rate}` : ''}${p.last24hAtLeast ? ` · ${p.last24h}+ in 24h` : p.last24h >= 3 ? ` · ${p.last24h} in 24h` : ''}</span>${chip}</div>${bits.length ? `<div class="leg" style="margin-bottom:6px">${bits.join('<span class="muted">·</span>')}</div>` : ''}`;
     }
     secOperator(r) {
       const o = r.operator;
@@ -506,9 +509,9 @@ tr.how td { border-bottom: 1px solid #171b25; }
           .map((l) => {
             const how = (l.linkedBy || []).map((x) => (x.wallets && x.wallets.length > 1 ? x.how : `${short(x.wallet)} (${x.how})`)).join('; ') || (l.relation === 'created' ? 'created by a cluster wallet' : 'cluster wallets bought in its launch window');
             const tag = l.relation === 'created' ? (l.viaInfra ? 'funder\'s dev' : 'same dev') : l.viaInfra ? 'same funder' : 'same wallets';
-            const when = l.createdAt ? `<span class="muted" style="font-size:10px"> ${ago(l.createdAt).replace(' ago', '')}</span>` : '';
+            const when = l.createdAt ? `${ago(l.createdAt).replace(' ago', '')} · ` : '';
             const showHow = l.source !== 'pump.fun' || l.viaInfra;
-            return `<tr><td><a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.symbol || short(l.mint))}</a>${when} <span class="pill na" title="${esc(how)}">${tag}</span></td><td class="num" title="${l.source === 'on-chain' ? 'from on-chain trades (no price candles yet) — a lower bound' : l.source === 'pump.fun' ? 'all-time high market cap (pump.fun record)' : ''}">${fmtUsd(l.peakMcapUsd)}${l.source === 'on-chain' ? '<span class="muted">≥</span>' : ''}${l.graduated ? ' <span class="good" title="graduated to a DEX">G</span>' : ''}</td><td class="num">${l.minutesToPeak == null ? '—' : l.minutesToPeak <= 0.1 ? '<span class="muted" title="peaked in the launch block">launch</span>' : fmtMin(l.minutesToPeak)}</td><td class="num">${fmtUsd(l.nowMcapUsd)}</td><td class="sold">${l.clusterExit?.sells ? `<span class="bad" title="${esc(`sold ${l.clusterExit.soldShare != null ? Math.round(l.clusterExit.soldShare * 100) + '% of their bag' : ''} ${l.clusterExit.solOut ? 'for ' + l.clusterExit.solOut.toFixed(2) + ' SOL' : ''}`)}">${l.clusterExit.firstSellSec != null && l.clusterExit.firstSellSec < 90 ? `+${l.clusterExit.firstSellSec}s` : `+${l.clusterExit.firstSellMin}m`}</span>` : l.clusterExit ? `<span class="good" title="${esc(l.clusterExit.note || '')}">held</span>` : '<span class="muted" title="not checked">—</span>'}</td></tr>
+            return `<tr><td class="pl"><a class="sym" href="${esc(l.url)}" target="_blank" rel="noopener" title="${esc(l.symbol || l.mint)}">${esc(l.symbol || short(l.mint))}</a><span class="pls" title="${esc(how)}">${when}${tag}</span></td><td class="num" title="${l.source === 'on-chain' ? 'from on-chain trades (no price candles yet) — a lower bound' : l.source === 'pump.fun' ? 'all-time high market cap (pump.fun record)' : ''}">${fmtUsd(l.peakMcapUsd)}${l.source === 'on-chain' ? '<span class="muted">≥</span>' : ''}${l.graduated ? ' <span class="good" title="graduated to a DEX">G</span>' : ''}</td><td class="num">${l.minutesToPeak == null ? '—' : l.minutesToPeak <= 0.1 ? '<span class="muted" title="peaked in the launch block">launch</span>' : fmtMin(l.minutesToPeak)}</td><td class="num">${fmtUsd(l.nowMcapUsd)}</td><td class="sold">${l.clusterExit?.sells ? `<span class="bad" title="${esc(`sold ${l.clusterExit.soldShare != null ? Math.round(l.clusterExit.soldShare * 100) + '% of their bag' : ''} ${l.clusterExit.solOut ? 'for ' + l.clusterExit.solOut.toFixed(2) + ' SOL' : ''}`)}">${l.clusterExit.firstSellSec != null && l.clusterExit.firstSellSec < 90 ? `+${l.clusterExit.firstSellSec}s` : `+${l.clusterExit.firstSellMin}m`}</span>` : l.clusterExit ? `<span class="good" title="${esc(l.clusterExit.note || '')}">held</span>` : '<span class="muted" title="not checked">—</span>'}</td></tr>
             ${showHow ? `<tr class="how"><td colspan="5" class="muted" style="font-size:10.5px;padding-top:0">↳ linked because ${esc(how)}</td></tr>` : ''}`;
           })
           .join('')}</table>${o.launches.length > shown.length ? `<div class="note">${o.launches.length - shown.length} more launch${o.launches.length - shown.length === 1 ? '' : 'es'} counted in the rating · <a href="https://pump.fun/profile/${esc(r.creation?.creator || '')}?tab=coins" target="_blank" rel="noopener">all on pump.fun</a></div>` : ''}`;

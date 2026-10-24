@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "GLASS \u2014 Solana launch scanner",
   "short_name": "GLASS",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Who really bought the launch, how the wallets link, and the dev's full track record \u2014 on every Solana token page.",
   "minimum_chrome_version": "110",
   "icons": {

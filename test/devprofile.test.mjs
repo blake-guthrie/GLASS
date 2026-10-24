@@ -41,7 +41,8 @@ function stubFetch(all) {
     const limit = Math.min(70, Number(u.searchParams.get('limit') || 70));
     const order = u.searchParams.get('order') || 'DESC';
     const list = order === 'ASC' ? [...all].reverse() : all;
-    const body = JSON.stringify(list.slice(offset, offset + limit));
+    // like the real API: nothing past offset 1000, in either direction
+    const body = JSON.stringify(offset > 1000 ? [] : list.slice(offset, offset + limit));
     return new Response(body, { status: 200, headers: { 'content-type': 'application/json' } });
   };
   return calls;
@@ -161,4 +162,35 @@ test('computeScore carries the call', () => {
   const s = computeScore({ launch: launch({ organic: 70, snipers: 4 }), wallets: {}, live: null, operator: null, ctx: { operatorDone: true } });
   assert.ok(s.call);
   assert.equal(s.call.word, 'Interesting');
+});
+
+function farm(n, wallet) {
+  const t0 = Date.now(); // the minting-rate maths runs against the real clock
+  const all = [];
+  for (let i = 0; i < n; i++) all.push(coin(i, { creator: wallet, mint: `M${wallet.slice(0, 4)}${String(i).padStart(38, '0')}`, created_timestamp: t0 - i * 120_000, ath_market_cap: 4000, ath_market_cap_timestamp: t0 - i * 120_000 }));
+  return all;
+}
+
+test('creatorProfile: 1,500 coins — past the API offset cap, still counted exactly from both ends', async () => {
+  const W = 'FarmWallet2222222222222222222222222222222222';
+  stubFetch(farm(1500, W));
+  const p = await creatorProfile(W, { currentMint: 'none' });
+  assert.equal(p.totalCreated, 1500);
+  assert.equal(p.exact, true);
+  assert.equal(p.atLeast, false);
+});
+
+test('creatorProfile: 5,202 coins — API cannot list them all, so "2,000+" and the recent minting rate', async () => {
+  const W = 'FarmWallet3333333333333333333333333333333333';
+  stubFetch(farm(5202, W));
+  const p = await creatorProfile(W, { currentMint: 'none' });
+  assert.equal(p.totalCreated, 2000);
+  assert.equal(p.atLeast, true);
+  assert.equal(p.countCapped, true);
+  assert.equal(p.perDayRecent, true);
+  assert.ok(Math.abs(p.perDay - 720) < 5, `one coin every 2 min ≈ 720/day, got ${p.perDay}`);
+  assert.equal(p.archetype.kind, 'farm');
+  const rating = rateOperator(toPriorLaunches(p, W), { marketCapUsd: 5000, profile: p });
+  assert.match(rating.reasons[0], /2,000\+ tokens/);
+  assert.match(rating.reasons[0], /per day lately/);
 });

@@ -8,7 +8,9 @@ import { fetchJson } from '../http.js';
 import { SOURCES } from '../constants.js';
 
 const PAGE = 70; // the API returns at most ~70 coins per request regardless of `limit`
-const MAX_COUNT = 20_000; // stop counting here ("20,000+")
+// pump.fun's API returns [] for any offset above 1000, in either sort direction, so one direction can
+// list at most 1,001 coins. Paging from both ends reaches 2,002; past that only a lower bound is knowable.
+const API_OFFSET_CAP = 1000;
 const GRADUATION_MCAP = 69_000;
 
 const memo = new Map();
@@ -71,14 +73,18 @@ export function normaliseCoin(c) {
 
 /**
  * Total coins created by a wallet. The first page tells us "≤70"; beyond that we probe offsets
- * (exponential, then bisect) with limit=1. ~12 tiny requests for a 5,000-token farm.
+ * (exponential, then bisect) with limit=1, up to the API's offset cap. Wallets with more than 1,001
+ * coins are counted from both ends (newest-first and oldest-first): exact up to 2,002, a lower bound above.
  */
+async function coinAt(creator, offset, order = 'DESC') {
+  return (await fetchCreatorCoins(creator, { offset, limit: 1, order }))[0] || null;
+}
 async function countCreated(creator, firstPageLen) {
   if (firstPageLen < PAGE) return { total: firstPageLen, exact: true };
-  const has = async (offset) => (await fetchCreatorCoins(creator, { offset, limit: 1 })).length > 0;
-  // exponential probe, in parallel
+  const has = async (offset) => (await coinAt(creator, offset)) != null;
   const probes = [];
-  for (let o = PAGE * 2; o <= MAX_COUNT; o *= 2) probes.push(o);
+  for (let o = PAGE * 2; o < API_OFFSET_CAP; o *= 2) probes.push(o);
+  probes.push(API_OFFSET_CAP);
   const hits = await Promise.all(probes.map((o) => has(o).catch(() => null)));
   let lo = PAGE - 1; // highest index known to exist (first page was full)
   let hi = null; // known empty
@@ -87,10 +93,9 @@ async function countCreated(creator, firstPageLen) {
     else if (hits[i] === false) {
       hi = probes[i];
       break;
-    } else if (hits[i] === null) break; // request failed — stop, report lower bound
+    } else if (hits[i] === null) return { total: lo + 1, exact: false, atLeast: true }; // request failed
   }
-  if (hi == null) return { total: lo, exact: false, atLeast: true };
-  // bisect
+  if (hi == null) return countBeyondCap(creator); // offset 1000 exists: more than one direction can list
   while (hi - lo > 1) {
     const mid = Math.floor((lo + hi) / 2);
     let ok;
@@ -103,6 +108,37 @@ async function countCreated(creator, firstPageLen) {
     else hi = mid;
   }
   return { total: lo + 1, exact: true };
+}
+
+async function countBeyondCap(creator) {
+  const CAP = API_OFFSET_CAP;
+  const [edgeNew, edgeOld] = await Promise.all([coinAt(creator, CAP, 'DESC').catch(() => null), coinAt(creator, CAP, 'ASC').catch(() => null)]);
+  if (!edgeNew) return { total: CAP + 1, exact: false, atLeast: true };
+  const tNew = Number(edgeNew.created_timestamp);
+  // the newest 1,001 coins span [tNew, now] — the only honest basis for "how fast are they minting now"
+  const recent = { n: CAP + 1, since: tNew };
+  if (!edgeOld) return { total: CAP + 1, exact: false, atLeast: true, recent };
+  if (Number(edgeOld.created_timestamp) < tNew) {
+    // the oldest 1,001 and the newest 1,001 don't meet: more than 2,002 coins, the API can't say how many
+    return { total: 2000, exact: false, atLeast: true, capped: true, recent }; // shown as "2,000+"
+  }
+  // They overlap, so the newest list's last coin sits at oldest-first index (total − 1001) ≤ 1000. Find it.
+  let lo = 0, hi = CAP;
+  try {
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      const c = await coinAt(creator, mid, 'ASC');
+      if (c && Number(c.created_timestamp) < tNew) lo = mid + 1;
+      else hi = mid;
+    }
+    for (let i = lo; i <= Math.min(CAP, lo + 4); i++) {
+      const c = await coinAt(creator, i, 'ASC');
+      if (c?.mint === edgeNew.mint) return { total: i + CAP + 1, exact: true };
+    }
+  } catch {
+    return { total: CAP + 1, exact: false, atLeast: true, recent };
+  }
+  return { total: lo + CAP + 1, exact: false };
 }
 
 /**
@@ -142,6 +178,8 @@ export async function creatorProfile(creator, { currentMint, log = () => {}, sam
     const now = Date.now();
     const spanDays = firstCreatedAt ? Math.max(1 / 24, (now - firstCreatedAt) / 86400000) : null;
     const total = count.total;
+    // Above 2,002 coins the total is only a lower bound, so the minting rate comes from the newest 1,001
+    const recentPerDay = count.atLeast && count.recent ? count.recent.n / Math.max(1 / 24, (now - count.recent.since) / 86400000) : null;
     const within = (ms) => coins.filter((c) => c.createdAt && now - c.createdAt <= ms).length;
     const pageOldest = coins[coins.length - 1]?.createdAt || null;
     const sampleFull = page.length >= PAGE;
@@ -151,7 +189,8 @@ export async function creatorProfile(creator, { currentMint, log = () => {}, sam
     const last24hAtLeast = sampleFull && pageOldest && now - pageOldest <= 86400000;
     const last7dAtLeast = sampleFull && pageOldest && now - pageOldest <= 7 * 86400000;
     const stats = summarise(sample);
-    const archetype = classifyArchetype({ total, spanDays, last24h, last24hAtLeast, stats, sampleFull });
+    const perDay = recentPerDay ?? (spanDays ? total / spanDays : null);
+    const archetype = classifyArchetype({ total, spanDays, perDay, last24h, last24hAtLeast, stats, sampleFull });
     return {
       available: true,
       source: 'pump.fun',
@@ -162,7 +201,9 @@ export async function creatorProfile(creator, { currentMint, log = () => {}, sam
       firstCreatedAt,
       lastCreatedAt,
       spanDays,
-      perDay: spanDays ? total / spanDays : null,
+      perDay,
+      perDayRecent: recentPerDay != null,
+      countCapped: !!count.capped,
       last24h,
       last24hAtLeast: !!last24hAtLeast,
       last7d,
@@ -231,9 +272,9 @@ export function summarise(sample) {
  *  repeat    – a handful of launches
  *  first     – this is their first token
  */
-export function classifyArchetype({ total, spanDays, last24h, last24hAtLeast, stats, sampleFull }) {
+export function classifyArchetype({ total, spanDays, perDay: rate, last24h, last24hAtLeast, stats, sampleFull }) {
   if (total <= 1) return { kind: 'first', label: 'First launch from this wallet' };
-  const perDay = spanDays ? total / spanDays : 0;
+  const perDay = rate ?? (spanDays ? total / spanDays : 0);
   const rapid = perDay >= 10 || last24hAtLeast || last24h >= 20;
   const farm = total >= 50 && rapid && (stats.n ? stats.ranRate <= 0.15 : true);
   if (farm) return { kind: 'farm', label: 'Token farm' };

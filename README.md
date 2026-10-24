@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3ecf8e" alt="MIT license" /></a>
-  <img src="https://img.shields.io/badge/version-0.3.2-4cc9f0" alt="version 0.3.2" />
+  <img src="https://img.shields.io/badge/version-0.3.3-4cc9f0" alt="version 0.3.3" />
   <img src="https://img.shields.io/badge/runtime%20dependencies-0-3ecf8e" alt="zero runtime dependencies" />
   <img src="https://img.shields.io/badge/wallet%20access-none-3ecf8e" alt="no wallet access" />
   <a href="#get-paid-to-make-glass-better"><img src="https://img.shields.io/badge/bounties-paid%20in%20%24GLASS%20fees-f5b544" alt="paid bounties" /></a>
@@ -113,7 +113,7 @@ $GLASS is the token that funds GLASS. **Its creator fees pay people to make the 
 
 | | |
 |---|---|
-| **Contract address** | `Launching 10/24 at 12pm CT` |
+| **Contract address** | `Launching soon` |
 | **Chain / launchpad** | Solana · pump.fun |
 | **Official links** | [X / Twitter](https://x.com/glassonsol) · [pump.fun](https://pump.fun/profile/GLASStreasury) |
 | **Treasury** | `5s1Lim2SqhTyDxeGdtmDzL4V8pPdwoiRRYL6uKLXwxYr` |
