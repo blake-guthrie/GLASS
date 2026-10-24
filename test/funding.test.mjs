@@ -185,6 +185,28 @@ test('missing and capped history remain bounded, without first-ever or source cl
   }
 });
 
+test('archive completion restores first-observed age only with an available zero-balance beginning', async () => {
+  for (const variant of ['complete', 'pre-existing', 'missing', 'failed', 'capped']) {
+    const tx = solTx();
+    if (variant === 'pre-existing') { tx.meta.preBalances[1] = 1; tx.meta.postBalances[1] += 1; }
+    if (variant === 'failed') tx.meta.err = { InstructionError: [0, 'fixture'] };
+    const rpc = {
+      async historyStart() { return 50; },
+      async getSignaturesForAddress() { return [{ signature: 'pruned', slot: 50, blockTime: tx.blockTime + 3500 }]; },
+      async getTransactions(s) { return s.map(() => null); },
+    };
+    const archive = {
+      async getSignaturesForAddress() { return Array.from({ length: variant === 'capped' ? 1000 : 1 }, (_, i) => ({ signature: `archive-${i}`, slot: 1, blockTime: tx.blockTime })); },
+      async getTransactions(s) { return s.map(() => variant === 'missing' ? null : tx); },
+    };
+    const { profiles: [p] } = await profileWallets(rpc, [wallet], { launchTimeSec: tx.blockTime + 3600, archive, known: { exchanges: { [other]: 'Example exchange' } } });
+    assert.equal(p.fundingHistoryIncomplete, variant !== 'complete', variant);
+    assert.equal(p.ageHoursAtLaunch, variant === 'complete' ? 1 : null, variant);
+    assert.equal(p.fundingHistory, 'first-observed');
+    if (variant === 'complete') { assert.equal(p.deepenedViaArchive, true); assert.equal(p.txCountCapped, false); assert.equal(p.historyTruncated, false); }
+  }
+});
+
 test('independent traders sharing Jupiter and a fee/rent sponsor retain sponsorship without shared-funder scoring', async () => {
   const trader = 'G11111111111111111111111111111111111111111111';
   const rotated = JSON.parse(JSON.stringify(captured).replaceAll(wallet, trader));

@@ -82,6 +82,7 @@ export async function profileWallets(rpc, wallets, ctx, { onProgress } = {}) {
             fundingRpc = ctx.archive;
             prof.historyTruncated = false;
             prof.txCountCapped = false;
+            prof.fundingHistoryIncomplete = false; // re-check the recovered first body below
             prof.deepenedViaArchive = true;
             const f0 = oldest[0]?.blockTime ?? null;
             prof.firstTxAt = f0 ? f0 * 1000 : prof.firstTxAt;
