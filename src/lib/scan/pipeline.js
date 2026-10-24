@@ -325,7 +325,7 @@ export async function runScan(rpc, identifier, opts = {}) {
   // Operator cluster = creator + bundle-like (and unclassified) launch wallets + the wallets that paid
   // for or funded them (those usually carry the history when the buyers are fresh). Snipers and organic
   // buyers are tracked for insider flow but never treated as the operator.
-  const linkers = [...(analysis?.sharedPayers || []).map((x) => x.address), ...(report.wallets?.summary?.sharedPayers || []).map((x) => x.address), ...(report.wallets?.summary?.sharedFunders || []).map((x) => x.address)].filter(
+  const linkers = [...(analysis?.sharedPayers || []).map((x) => x.address), ...(report.wallets?.summary?.sharedPayers || []).filter((x) => x.operatorLink !== false).map((x) => x.address), ...(report.wallets?.summary?.sharedFunders || []).map((x) => x.address)].filter(
     (a) => a && a !== creator,
   );
   const operatorWallets = [...new Set([...linkers, ...(analysis?.classified ? analysis.bundle.wallets : clusterWallets)])];

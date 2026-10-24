@@ -3,6 +3,7 @@
 import { LAMPORTS_PER_SOL, PROGRAMS } from '../constants.js';
 import { parseTx } from '../txparse.js';
 import { pMap } from '../http.js';
+import { fundingForWallet } from '../funding.js';
 
 function stats(arr) {
   if (!arr.length) return { mean: 0, cv: null };
@@ -58,9 +59,9 @@ export async function profileWallets(rpc, wallets, ctx, { onProgress } = {}) {
         flags: [],
       };
 
-      // Funding: look at the oldest txs (only meaningful if we reached the start of history).
-      // Three shapes: a system transfer in; a WSOL account closed into the wallet (no transfer ever
-      // touches the wallet — the launch-tool trick); or simply a third party paying the wallet's fees.
+      // First observed receipts are not proof of a wallet's complete funding history.
+      prof.fundingHistory = 'first-observed';
+      prof.fundingHistoryIncomplete = capped || !ordered.length;
       let oldestInfos = !capped && ordered.length ? ordered.slice(0, 6) : null;
       let fundingRpc = rpc;
       // The free RPC pruned this wallet's beginning → page back on the archive endpoint (up to 2 pages)
@@ -93,66 +94,48 @@ export async function profileWallets(rpc, wallets, ctx, { onProgress } = {}) {
       }
       if (oldestInfos) {
         const oldestRaws = await fundingRpc.getTransactions(oldestInfos.map((s) => s.signature));
-        for (let i = 0; i < oldestRaws.length; i++) {
+        let missing = oldestRaws.length !== oldestInfos.length;
+        for (let i = 0; i < oldestInfos.length; i++) {
           const rec = parseTx(oldestRaws[i], oldestInfos[i].signature);
-          if (!rec) continue;
+          if (!rec) { missing = true; continue; }
+          if (rec.err) { if (i === 0) prof.fundingHistoryIncomplete = true; continue; }
+          if (i === 0 && (rec.fundingProvenance.preBalances[wallet] == null || rec.fundingProvenance.preBalances[wallet] > 0 ||
+            oldestRaws[i].meta.preTokenBalances?.some(b => b.owner === wallet && Number(b.uiTokenAmount?.amount) > 0))) prof.fundingHistoryIncomplete = true;
           if (rec.feePayer && rec.feePayer !== wallet && !prof.firstPayer) prof.firstPayer = rec.feePayer;
-          const gained = (rec.solDelta[wallet] || 0) / LAMPORTS_PER_SOL;
-          const incoming = rec.systemTransfers.filter((t) => t.to === wallet && t.lamports > 0 && t.from !== wallet);
-          if (incoming.length) {
-            const main = incoming.sort((a, b) => b.lamports - a.lamports)[0];
-            prof.fundingSource = main.from;
-            prof.fundingMethod = 'transfer';
-            prof.fundedSol = main.lamports / LAMPORTS_PER_SOL;
-            prof.fundedAt = rec.blockTime ? rec.blockTime * 1000 : null;
-            prof.fundingTx = rec.sig;
-            break;
-          }
-          const closed = rec.closeAccounts.find((c) => c.destination === wallet);
-          if (closed && gained > 0) {
-            // The fee payer created and closed the temp WSOL account — that's the real funder.
-            prof.fundingSource = rec.feePayer !== wallet ? rec.feePayer : closed.owner || null;
-            prof.fundingVia = closed.owner || null;
-            prof.fundingMethod = 'wsol-close';
-            prof.fundedSol = gained;
-            prof.fundedAt = rec.blockTime ? rec.blockTime * 1000 : null;
-            prof.fundingTx = rec.sig;
-            prof.flags.push('funded by closing a WSOL account (transfer-graph evasion)');
-            break;
-          }
-          if (gained > 0 && rec.feePayer !== wallet) {
-            prof.fundingSource = rec.feePayer;
-            prof.fundingMethod = 'payer';
-            prof.fundedSol = gained;
-            prof.fundedAt = rec.blockTime ? rec.blockTime * 1000 : null;
-            prof.fundingTx = rec.sig;
-            break;
-          }
-          // Tokens received from another wallet first (then sold for SOL) — a hand-off style funding
-          const tokIn = (rec.splTransfers || []).find((t) => t.toOwner === wallet && t.fromOwner && t.fromOwner !== wallet);
-          if (tokIn) {
-            prof.fundingSource = tokIn.fromOwner;
-            prof.fundingMethod = 'token-transfer';
-            prof.fundedAt = rec.blockTime ? rec.blockTime * 1000 : null;
-            prof.fundingTx = rec.sig;
-            prof.flags.push('first received tokens from another wallet, not SOL');
-            break;
-          }
-          if (gained > 0) {
-            // SOL appeared from a program (a sell / swap) with no transfer — proceeds of a trade
-            const prog = (rec.programs || []).find((x) => ![PROGRAMS.SYSTEM, PROGRAMS.ATA, PROGRAMS.TOKEN, PROGRAMS.TOKEN_2022, PROGRAMS.COMPUTE_BUDGET].includes(x));
-            prof.fundingMethod = 'proceeds';
-            prof.fundingProgram = prog || null;
-            prof.fundedSol = gained;
-            prof.fundedAt = rec.blockTime ? rec.blockTime * 1000 : null;
-            prof.fundingTx = rec.sig;
-            prof.fundingNote = 'first SOL came out of a trade (sold tokens it already held), not a transfer';
-            break;
-          }
+          const evidence = fundingForWallet(rec, wallet);
+          if (!evidence) continue;
+          prof.fundingEvidence = evidence;
+          prof.fundingTx = rec.sig;
+          prof.fundedAt = rec.blockTime != null ? rec.blockTime * 1000 : null;
+          const external = evidence.components.filter(c => ['sol-transfer', 'external-wsol', 'token-transfer'].includes(c.kind) && c.source && c.source !== wallet);
+          const sources = [...new Set(external.map(c => c.source))];
+          // Only an evidenced external transfer can create a funding-source edge. Sponsors remain
+          // explicit receipt components, even when they also paid transaction fees.
+          prof.fundingSource = sources.length === 1 ? sources[0] : null;
+          const swap = evidence.components.some(c => c.kind === 'swap-proceeds');
+          prof.fundingMethod = swap ? 'swap-proceeds' : external.length ?
+            (external.some(c => c.kind === 'sol-transfer') ? 'transfer' : external.some(c => c.kind === 'external-wsol') ? 'wsol-close' : 'token-transfer') :
+            evidence.components.some(c => c.kind.startsWith('unknown-')) ? 'unknown' :
+            evidence.components.some(c => c.kind === 'self-unwrap') ? 'self-unwrap' :
+            evidence.components.some(c => c.kind === 'account-rent') ? 'rent-return' : 'unknown';
+          prof.fundedSol = external.some(c => c.lamports != null) ? external.reduce((sum, c) => sum + (c.lamports || 0), 0) / LAMPORTS_PER_SOL : null;
+          prof.fundingNote = swap ? 'Observed Jupiter swap proceeds; account rent is shown separately. Earlier funding is unknown.' :
+            prof.fundingMethod === 'self-unwrap' ? 'Observed own WSOL unwrapped; earlier source and rent depositor may be unknown.' :
+            prof.fundingMethod === 'rent-return' ? 'Observed account-rent return; this does not establish the source of trading capital.' :
+            external.length ? 'Observed external transfer; earlier history is not established.' :
+            'Observed SOL movement has incomplete provenance; fee payer is not assumed to be its source.';
+          break;
         }
-        if (!prof.fundingSource) prof.fundingNote = 'first transactions carry no incoming SOL (funded via a token swap or an exotic path)';
+        if (missing) {
+          prof.fundingHistoryIncomplete = true;
+          prof.flags.push('one or more early transaction bodies unavailable');
+        }
+        if (!prof.fundingNote) prof.fundingNote = 'No incoming funding identified in the sampled transactions; earlier funding is unknown.';
       } else if (capped && !truncatedByRpc) prof.fundingNote = '1000+ transactions — beginning not reached';
       else if (truncatedByRpc) prof.fundingNote = ctx.archive ? 'older than the archive RPC keeps' : 'older than this RPC keeps';
+
+      prof.firstObservedAgeHours = prof.ageHoursAtLaunch;
+      if (prof.fundingHistoryIncomplete) prof.ageHoursAtLaunch = null;
 
       // Generated-activity sample: up to 8 pre-launch txs → program diversity & SOL moved
       if (pre.length) {
@@ -164,7 +147,7 @@ export async function profileWallets(rpc, wallets, ctx, { onProgress } = {}) {
         let n = 0;
         for (let i = 0; i < raws.length; i++) {
           const rec = parseTx(raws[i], uniq[i]);
-          if (!rec) continue;
+          if (!rec || rec.err) continue;
           n++;
           for (const p of rec.programs) if (![PROGRAMS.SYSTEM, PROGRAMS.ATA, PROGRAMS.TOKEN, PROGRAMS.TOKEN_2022].includes(p)) programs.set(p, (programs.get(p) || 0) + 1);
           const moved = Math.abs(rec.solDelta[wallet] || 0) / LAMPORTS_PER_SOL;
@@ -180,9 +163,9 @@ export async function profileWallets(rpc, wallets, ctx, { onProgress } = {}) {
       }
 
       if (prof.historyTruncated) prof.flags.push('older than this RPC\'s history — age and funding unknown');
-      if (prof.ageHoursAtLaunch != null && prof.ageHoursAtLaunch < 1) prof.flags.push('wallet created <1h before launch');
+      if (prof.ageHoursAtLaunch != null && prof.ageHoursAtLaunch < 1) prof.flags.push('first observed transaction <1h before launch');
       else if (prof.ageHoursAtLaunch != null && prof.ageHoursAtLaunch >= 24 && prof.ageHoursAtLaunch <= 72 && pre.length <= 12) prof.flags.push('aged 24–72h with light activity (warm-up pattern)');
-      if (pre.length === 0 && !capped) prof.flags.push('first ever tx was the launch buy');
+      if (pre.length === 0 && !capped) prof.flags.push('no pre-launch transactions in the returned history');
       onProgress?.();
       return prof;
     },
@@ -239,7 +222,7 @@ export async function profileWallets(rpc, wallets, ctx, { onProgress } = {}) {
 export function classifyKind(prof, buyer) {
   const heavy = (prof.txCountCapped && !prof.historyTruncated) || prof.preLaunchTxs >= 150;
   if (heavy) return 'sniper';
-  if (prof.historyTruncated) {
+  if (prof.historyTruncated || prof.fundingHistoryIncomplete) {
     // We can't see its beginning: only call it a bundle wallet on positive evidence.
     const linked = prof.fundingKind === 'linked' || prof.fundingKind === 'shared-funder';
     const warmed = prof.activityScore != null && prof.activityScore >= 0.6;
@@ -262,15 +245,26 @@ function summarise(profiles, sourceInfo) {
   for (const p of profiles) kindCounts[p.kind] = (kindCounts[p.kind] || 0) + 1;
   const kinds = {};
   for (const p of profiles) kinds[p.fundingKind] = (kinds[p.fundingKind] || 0) + 1;
+  const fundingMethods = {};
+  const rentSponsors = new Map();
+  for (const p of profiles) {
+    fundingMethods[p.fundingMethod || 'unknown'] = (fundingMethods[p.fundingMethod || 'unknown'] || 0) + 1;
+    for (const c of p.fundingEvidence?.components || []) if (c.kind === 'account-rent' && c.source && c.source !== p.wallet) {
+      if (!rentSponsors.has(c.source)) rentSponsors.set(c.source, { address: c.source, wallets: [], lamports: 0, operatorLink: false });
+      const row = rentSponsors.get(c.source);
+      if (!row.wallets.includes(p.wallet)) row.wallets.push(p.wallet);
+      row.lamports += c.lamports;
+    }
+  }
   const exchanges = new Set(profiles.filter((p) => p.fundingKind === 'exchange').map((p) => p.fundingLabel));
   const sharedFunders = [...sourceInfo.entries()].filter(([, i]) => i.kind === 'shared-funder' || i.kind === 'linked').map(([a, i]) => ({ address: a, label: i.label }));
   const payerCounts = new Map();
   for (const p of profiles) if (p.firstPayer) payerCounts.set(p.firstPayer, (payerCounts.get(p.firstPayer) || 0) + 1);
-  const sharedPayers = [...payerCounts.entries()].filter(([, n]) => n >= 2).map(([address, count]) => ({ address, count })).sort((a, b) => b.count - a.count);
+  const sharedPayers = [...payerCounts.entries()].filter(([, n]) => n >= 2).map(([address, count]) => ({ address, count, operatorLink: false })).sort((a, b) => b.count - a.count);
   const wsolFunded = profiles.filter((p) => p.fundingMethod === 'wsol-close').length;
 
   // Funding-time clustering: largest group funded within the same 60-minute window
-  const times = profiles.map((p) => p.fundedAt).filter(Boolean).sort((a, b) => a - b);
+  const times = profiles.filter(p => p.fundingSource).map((p) => p.fundedAt).filter(Boolean).sort((a, b) => a - b);
   let bestCluster = 0;
   for (let i = 0; i < times.length; i++) {
     let j = i;
@@ -281,8 +275,8 @@ function summarise(profiles, sourceInfo) {
   const agesSorted = [...ages].sort((a, b) => a - b);
   const medianAge = agesSorted.length ? agesSorted[Math.floor(agesSorted.length / 2)] : null;
   const generated = profiles.filter((p) => p.activityScore != null && p.activityScore >= 0.6).length;
-  const fresh = profiles.filter((p) => p.preLaunchTxs === 0 && !p.txCountCapped).length;
-  const fundedSol = profiles.map((p) => p.fundedSol).filter((x) => x != null);
+  const fresh = profiles.filter((p) => p.preLaunchTxs === 0 && !p.txCountCapped && !p.fundingHistoryIncomplete).length;
+  const fundedSol = profiles.filter(p => p.fundingSource).map((p) => p.fundedSol).filter((x) => x != null);
   const roundish = fundedSol.filter((x) => Math.abs(x * 10 - Math.round(x * 10)) < 0.011).length;
 
   const reasons = [];
@@ -293,8 +287,8 @@ function summarise(profiles, sourceInfo) {
   if (fresh >= 3) reasons.push(`${fresh} wallets had no history before the launch buy`);
   if (medianAge != null && medianAge >= 24 && medianAge <= 96) reasons.push(`median wallet age ${Math.round(medianAge)}h (aged, not organic-old)`);
   if (sharedFunders.length) reasons.push(`${sharedFunders.length} shared funder(s) link wallets directly`);
-  if (sharedPayers.length) reasons.push(`${sharedPayers[0].count} wallets had their first transactions paid by the same wallet (${sharedPayers[0].address.slice(0, 4)}…)`);
-  if (wsolFunded >= 2) reasons.push(`${wsolFunded} wallets were funded by closing WSOL accounts into them (hides the funding transfer)`);
+  const observations = sharedPayers.length ? [`${sharedPayers[0].count} wallets share an observed fee payer; sponsorship alone does not establish common ownership.`] : [];
+  if (wsolFunded) observations.push(`${wsolFunded} wallets received evidenced external WSOL; close authority and rent are recorded separately.`);
   if (roundish >= 3 && roundish / fundedSol.length >= 0.6) reasons.push('wallets funded with round SOL amounts');
 
   // The sniper reason is informational; links are scored on the remaining reasons.
@@ -303,10 +297,13 @@ function summarise(profiles, sourceInfo) {
     walletsProfiled: n,
     kinds: kindCounts,
     fundingKinds: kinds,
+    fundingMethods,
+    rentSponsors: [...rentSponsors.values()],
     exchangesUsed: [...exchanges],
     sharedFunders,
     sharedPayers,
     wsolFunded,
+    observations,
     fundingTimeClusterMax: bestCluster,
     medianAgeHours: medianAge,
     generatedActivityWallets: generated,
