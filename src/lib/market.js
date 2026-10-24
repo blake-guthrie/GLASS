@@ -11,6 +11,19 @@ async function cached(key, ttlMs, fn) {
   return v;
 }
 
+export const USD_STABLE_MINTS = new Set([
+  'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
+  'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', // USDT
+  'USDH1SM1ojcxkgZsqgGaNZKoCcR64DGAbTKUmd234i5', // USDH
+  '2b1kV6ebUAKGJJrwQVsdJbpDr9G1r54vsNxN2wNWjPT7', // USDY
+]);
+
+export function isUsdQuoted(pairOrSymbol, quoteAddress) {
+  if (quoteAddress && USD_STABLE_MINTS.has(quoteAddress)) return true;
+  const sym = typeof pairOrSymbol === 'string' ? pairOrSymbol : pairOrSymbol?.quoteToken?.symbol || pairOrSymbol?.quoteSymbol;
+  return /^(usd|usdc|usdt|usdh|usdy|pyusd)$/i.test(sym || '');
+}
+
 function pickBestPair(pairs, mint) {
   const list = (pairs || []).filter((p) => p.chainId === 'solana' && (!mint || p.baseToken?.address === mint));
   if (!list.length) return null;
@@ -21,6 +34,14 @@ function pickBestPair(pairs, mint) {
 
 export function normalisePair(p) {
   if (!p) return null;
+  const quoteAddress = p.quoteToken?.address || null;
+  const quoteSymbol = p.quoteToken?.symbol || null;
+  const isUsd = isUsdQuoted(quoteSymbol, quoteAddress);
+
+  const priceUsd = p.priceUsd ? Number(p.priceUsd) : (isUsd && p.priceNative ? Number(p.priceNative) : null);
+  const priceNative = p.priceNative ? Number(p.priceNative) : null;
+  const marketCapUsd = p.marketCap ?? p.fdv ?? null;
+
   return {
     pairAddress: p.pairAddress,
     dexId: p.dexId,
@@ -28,9 +49,12 @@ export function normalisePair(p) {
     mint: p.baseToken?.address,
     name: p.baseToken?.name,
     symbol: p.baseToken?.symbol,
-    priceUsd: p.priceUsd ? Number(p.priceUsd) : null,
-    priceNative: p.priceNative ? Number(p.priceNative) : null,
-    marketCapUsd: p.marketCap ?? p.fdv ?? null,
+    quoteAddress,
+    quoteSymbol,
+    isUsdQuoted: isUsd,
+    priceUsd,
+    priceNative,
+    marketCapUsd,
     fdvUsd: p.fdv ?? null,
     liquidityUsd: p.liquidity?.usd ?? null,
     volume24h: p.volume?.h24 ?? null,
