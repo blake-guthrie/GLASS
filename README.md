@@ -207,6 +207,9 @@ Every request goes to the RPC you chose (or the built-in fallbacks `solana-rpc.p
 
 ## Development
 
+See [observed funding provenance](docs/funding-provenance.md) for the Jupiter/WSOL receipt contract,
+captured fixture and conservative history limits.
+
 ```bash
 npm test                          # full test suite, real mainnet fixtures, offline
 node cli/scan.mjs <mint-or-pair>  # the same engine in your terminal (--json out.json, --rpc URL)

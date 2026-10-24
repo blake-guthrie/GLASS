@@ -1,6 +1,7 @@
 // Normalise a `jsonParsed` Solana transaction into the flat record the scanners work with.
 import { decodeBase58, encodeBase58, readU32LE, readU64LE } from './base58.js';
 import { PROGRAMS, PUMP_IX, PUMP_BUY_IX, PUMP_SELL_IX, PUMP_CREATE_IX, ANCHOR_EVENT_CPI, PUMP_EVENTS, JITO_TIP_ACCOUNTS, LAMPORTS_PER_SOL } from './constants.js';
+import { fundingProvenance } from './funding.js';
 
 const DISC = Object.entries(PUMP_IX).map(([name, bytes]) => [name, bytes.join(',')]);
 const EVENT_CPI_KEY = ANCHOR_EVENT_CPI.join(',');
@@ -171,6 +172,7 @@ export function parseTx(tx, signatureHint) {
   const signers = keys.filter((k) => k.signer).map((k) => k.pubkey);
   const feePayer = pubkeys[0];
   const sig = tx.transaction.signatures?.[0] || signatureHint;
+  const funding = fundingProvenance(tx);
 
   // SOL deltas per account (lamports)
   const solDelta = {};
@@ -244,9 +246,12 @@ export function parseTx(tx, signatureHint) {
       const t = ix.parsed.type;
       const info = ix.parsed.info || {};
       if (t === 'closeAccount') {
-        // Closing a (WSOL) token account sends its lamports to `destination` — a common way to fund a
-        // wallet without a system transfer ever touching it.
-        closeAccounts.push({ account: info.account, destination: info.destination, owner: info.owner || info.multisigOwner || null, inner, via: depthProgram || null });
+        // The instruction's owner field is the close authority, not necessarily the token owner,
+        // rent depositor or economic source. Only successful, mint-resolved provenance is attached.
+        const evidence = funding.closes.find(c => c.account === info.account && c.destination === info.destination);
+        closeAccounts.push({ account: info.account, destination: info.destination, owner: info.owner || info.multisigOwner || null,
+          mint: evidence?.mint || null, accountOwner: evidence?.accountOwner || null,
+          closeAuthority: info.owner || info.multisigOwner || null, successful: !!evidence, inner, via: depthProgram || null });
         return;
       }
       if (t === 'transfer' || t === 'transferChecked') {
@@ -334,6 +339,7 @@ export function parseTx(tx, signatureHint) {
     solDelta,
     tokenDeltas,
     tokenAccountInfo,
+    fundingProvenance: funding,
     ixCount: topIxs.length,
     version: tx.version,
   };

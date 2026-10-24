@@ -373,9 +373,9 @@ tr.how td { border-bottom: 1px solid #171b25; }
       const fundingTxt = Object.entries(fk).map(([k, v]) => `${v} ${k === 'unknown' ? 'unknown' : k === 'linked' ? 'by another launch wallet' : k === 'shared-funder' ? 'by a shared funder' : k === 'high-volume' ? 'from a high-volume source' : k === 'exchange' ? 'from an exchange' : k}`).join(' · ') || '—';
       const rows = [
         `<span class="k" title="bundle = looks operator-controlled (fresh / linked / warmed-up / creation-block with identical settings) · sniper = high-volume bot that buys every launch · organic = older wallet with a normal history and no links">Profiled</span><span class="v">${s.walletsProfiled} · <span class="bad">${kinds.bundle || 0} bundle</span> · <span class="amber">${kinds.sniper || 0} sniper</span> · <span class="good">${kinds.organic || 0} organic</span></span>`,
-        `<span class="k" title="Where each wallet's first SOL came from: a plain transfer, a WSOL account closed into it (hides the transfer), or a third party paying its fees. 'unknown' = the wallet's first transactions are older than the RPCs GLASS can reach, or it was funded through a swap.">Funding</span><span class="v" style="white-space:normal;text-align:left">${esc(fundingTxt)}</span>`,
+        `<span class="k" title="Observed incoming transfers in the earliest sampled transactions. Swap proceeds, returned rent and transaction fee sponsorship have separate roles. Earlier funding may be unknown.">Funding</span><span class="v" style="white-space:normal;text-align:left">${esc(fundingTxt)}</span>`,
         `<span class="k" title="Only filled in when a funding source is a known exchange hot wallet (Binance, Coinbase, Crypto.com…). Different from Funding: that is *how* the SOL arrived, this is *who* it came from.">Exchanges</span><span class="v">${s.exchangesUsed?.length ? esc(s.exchangesUsed.join(', ')) : 'none recognised'}</span>`,
-        `<span class="k" title="Median wallet age at launch (first transaction → launch)">Median age</span><span class="v">${s.medianAgeHours == null ? '—' : fmtMin(s.medianAgeHours * 60)} before launch</span>`,
+        `<span class="k" title="Time from first observed transaction to launch, only when the sampled beginning has no known gaps or pre-existing SOL. This does not prove wallet creation time.">Observed age</span><span class="v">${s.medianAgeHours == null ? 'unknown' : fmtMin(s.medianAgeHours * 60)} before launch</span>`,
         `<span class="k" title="Wallets whose pre-launch activity looks scripted (same program over and over, dust-sized moves, regular gaps)">Warm-up activity</span><span class="v">${s.generatedActivityWallets || 0} wallets · fresh ${s.freshWallets || 0}</span>`,
       ];
       const reasons = s.reasons?.length ? `<ul class="rs">${s.reasons.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '<div class="note">No funding or activity links between launch wallets.</div>';
@@ -384,12 +384,22 @@ tr.how td { border-bottom: 1px solid #171b25; }
       const list = (w.profiles || []).slice(0, 14).map((p) => {
         const b = kindOf.get(p.wallet);
         const kind = b?.kind || p.kind;
-        const fund = p.fundingSource ? `${esc(p.fundingMethod === 'wsol-close' ? 'WSOL-close from' : p.fundingMethod === 'payer' ? 'fees paid by' : p.fundingMethod === 'token-transfer' ? 'tokens from' : 'transfer from')} ${link(p.fundingSource)}${p.fundingLabel ? ` <span class="muted">(${esc(p.fundingLabel)})</span>` : ''}${p.fundedSol ? ` ${fmtSol(p.fundedSol)}` : ''}${p.fundedAt ? ` <span class="muted">${ago(p.fundedAt)}</span>` : ''}` : `<span class="muted">${esc(p.fundingNote || 'funding unknown')}</span>`;
+        let fund = p.fundingSource ? `Observed ${esc(p.fundingMethod === 'wsol-close' ? 'external WSOL from' : p.fundingMethod === 'token-transfer' ? 'tokens from' : 'transfer from')} ${link(p.fundingSource)}${p.fundingLabel ? ` <span class="muted">(${esc(p.fundingLabel)})</span>` : ''}` : `<span class="muted">${esc(p.fundingNote || 'funding unknown')}</span>`;
+        const evidence = p.fundingEvidence;
+        if (evidence) {
+          const labels = { 'swap-proceeds': 'Jupiter swap proceeds', 'account-rent': 'account rent returned', 'self-unwrap': 'own WSOL unwrapped', 'external-wsol': 'external WSOL', 'sol-transfer': 'SOL transfer', 'token-transfer': 'token transfer', 'unknown-swap-output': 'swap output; input ownership unresolved', 'unknown-wsol': 'WSOL; source unresolved' };
+          fund += evidence.components.map(c => `<div>${esc(labels[c.kind] || c.kind)}${c.lamports != null ? `: ${esc(c.lamports)} lamports (${esc((c.lamports / 1e9).toFixed(9))} SOL)` : ''}${c.source ? ` · ${c.kind === 'account-rent' ? 'deposited by' : 'from'} ${link(c.source)}` : c.kind === 'account-rent' ? ' · depositor unknown' : ''}${c.inputOwners?.length ? ` · input owner ${c.inputOwners.map(a => link(a)).join(', ')}` : ''}</div>`).join('');
+          if (evidence.feePayer) fund += `<div class="muted">Transaction fee payer ${link(evidence.feePayer)}${evidence.feeLamports != null ? ` · ${esc(evidence.feeLamports)} lamports` : ''} (separate role)</div>`;
+          for (const c of evidence.closes || []) fund += `<div class="muted">Closed ${link(c.account)} · token owner ${c.accountOwner ? link(c.accountOwner) : 'unknown'} · close authority ${c.closeAuthority ? link(c.closeAuthority) : 'unknown'}</div>`;
+          if (evidence.coverage === 'partial') fund += `<div class="muted">${esc(evidence.note)}</div>`;
+          if (p.fundingTx) fund += `<div>${link(p.fundingTx, 'tx', 'funding receipt')}${p.fundedAt ? ` · ${ago(p.fundedAt)}` : ''} · first observed; earlier funding unknown</div>`;
+        }
         const age = p.ageHoursAtLaunch != null ? fmtMin(p.ageHoursAtLaunch * 60) : p.historyTruncated ? '>' + (r.rpc?.historyHours || 14) + 'h' : '—';
         return `<tr><td>${link(p.wallet)}<span class="pill ${esc(kind)}" title="${esc(b?.kindReason || '')}">${esc(kind)}</span></td><td class="num" title="wallet age at launch">${age}</td><td class="num" title="transactions before launch">${p.preLaunchTxs}${p.txCountCapped ? '+' : ''}</td><td style="white-space:normal">${fund}</td></tr>`;
       });
       const table = list.length ? `<div class="tscroll"><table><tr><th>wallet</th><th class="num">age</th><th class="num">txs</th><th>funded by</th></tr>${list.join('')}</table></div>${(w.profiles || []).length > 14 ? `<div class="note">${w.profiles.length - 14} more in Receipts.</div>` : ''}` : '';
-      return this.sec('wallets', 'Launch wallets', `${kinds.bundle || 0} bundle · ${kinds.sniper || 0} sniper`, `<div class="kv">${rows.join('')}</div>${reasons}${table}`);
+      const observations = (s.observations || []).map(x => `<div class="note">${esc(x)}</div>`).join('');
+      return this.sec('wallets', 'Launch wallets', `${kinds.bundle || 0} bundle · ${kinds.sniper || 0} sniper`, `<div class="kv">${rows.join('')}</div>${reasons}${observations}${table}`);
     }
     secLive(r) {
       const l = r.live;
