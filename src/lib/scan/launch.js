@@ -286,13 +286,24 @@ export function extractLaunchEvents(records, mint, creation) {
     if (trades.length) {
       for (const t of trades) {
         const pumpIx = rec.pumpIxs.find((p) => p.user === t.user) || rec.pumpIxs[0] || null;
+        const quoteMint = pumpIx?.quoteMint || PROGRAMS.WSOL;
+        const quoteScale = quoteMint === PROGRAMS.USDC ? 1e6 : LAMPORTS_PER_SOL;
+        const quoteAmount = t.quoteAmountRaw != null ? Number(t.quoteAmountRaw) / quoteScale : t.quoteAmount;
+        const tokenAmount = t.tokenAmountRaw != null ? Number(t.tokenAmountRaw) / 1e6 : t.tokenAmount;
+        const virtualQuote =
+          t.virtualQuoteReservesRaw != null ? Number(t.virtualQuoteReservesRaw) / quoteScale : t.vSol;
+        const virtualTokens =
+          t.virtualTokenReservesRaw != null ? Number(t.virtualTokenReservesRaw) / 1e6 : t.vTok;
         events.push({
           ...base,
           wallet: t.user,
           side: t.isBuy ? 'buy' : 'sell',
-          tokens: t.tokenAmount,
-          sol: t.quoteAmount,
-          priceQuote: t.priceQuote,
+          tokens: tokenAmount,
+          sol: quoteAmount,
+          quoteAmount,
+          quoteMint,
+          quoteSymbol: quoteMint === PROGRAMS.USDC ? 'USDC' : 'SOL',
+          priceQuote: virtualTokens > 0 ? virtualQuote / virtualTokens : null,
           isCreator: t.user === creator,
           slippageLimitSol: pumpIx?.solLimit ?? (pumpIx?.solIn ? pumpIx.solIn : null),
           pumpIxName: pumpIx?.name || null,

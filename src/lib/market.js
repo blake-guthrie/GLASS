@@ -103,6 +103,12 @@ export async function solPriceUsd() {
   });
 }
 
+export function quoteToUsdMultiplier(quoteMint, solUsd) {
+  if (quoteMint === PROGRAMS.USDC) return 1;
+  if (!quoteMint || quoteMint === PROGRAMS.WSOL) return solUsd || null;
+  return null;
+}
+
 // ---- GeckoTerminal (free tier: ~30 requests/minute → serialise with spacing) ----
 const gh = { accept: 'application/json;version=20230302' };
 let geckoChain = Promise.resolve();
