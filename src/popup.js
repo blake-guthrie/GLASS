@@ -5,7 +5,7 @@ const fields = ['rpcUrl', 'slotWindow', 'earlyWindowSec', 'maxWalletProfiles', '
 const checks = ['enabled', 'operatorHistory', 'liveTracking', 'jitoLookup'];
 
 async function load() {
-  const r = await chrome.storage.sync.get('settings');
+  const r = await browser.storage.sync.get('settings');
   const s = { enabled: true, ...DEFAULTS, ...(r?.settings || {}) };
   for (const f of fields) $(f).value = s[f] ?? '';
   for (const c of checks) $(c).checked = s[c] !== false;
@@ -29,9 +29,9 @@ async function ensureHostPermission(url) {
   } catch {
     return false;
   }
-  const have = await chrome.permissions.contains({ origins: [origin] });
+  const have = await browser.permissions.contains({ origins: [origin] });
   if (have) return true;
-  return chrome.permissions.request({ origins: [origin] });
+  return browser.permissions.request({ origins: [origin] });
 }
 
 $('save').addEventListener('click', async () => {
@@ -40,7 +40,7 @@ $('save').addEventListener('click', async () => {
     status('saved', 'Permission for that RPC host was not granted.', 'bad');
     return;
   }
-  await chrome.storage.sync.set({ settings: s });
+  await browser.storage.sync.set({ settings: s });
   status('saved', 'Saved', 'ok');
   setTimeout(() => status('saved', ''), 1500);
 });
@@ -56,13 +56,13 @@ $('testRpc').addEventListener('click', async () => {
   const url = $('rpcUrl').value.trim() || DEFAULTS.rpcUrl;
   status('rpcStatus', 'testing…');
   if (!(await ensureHostPermission(url))) return status('rpcStatus', 'host permission denied', 'bad');
-  const r = await chrome.runtime.sendMessage({ type: 'testRpc', url });
+  const r = await browser.runtime.sendMessage({ type: 'testRpc', url });
   if (r?.ok) status('rpcStatus', `ok · ${r.profile} · slot ${r.slot} · ${r.ms}ms · getBlock ${r.getBlock ? 'yes' : 'no'}${r.indexed === false ? ' · token-account queries via ATA' : ''}`, 'ok');
   else status('rpcStatus', `failed: ${r?.error || 'unknown'}`, 'bad');
 });
 
 $('clearCache').addEventListener('click', async () => {
-  await chrome.runtime.sendMessage({ type: 'clearCache' });
+  await browser.runtime.sendMessage({ type: 'clearCache' });
   refreshStats();
 });
 $('clearMemory').addEventListener('click', async () => {
@@ -71,7 +71,7 @@ $('clearMemory').addEventListener('click', async () => {
   refreshStats();
 });
 $('exportMemory').addEventListener('click', async () => {
-  const data = await chrome.runtime.sendMessage({ type: 'exportMemory' });
+  const data = await browser.runtime.sendMessage({ type: 'exportMemory' });
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
