@@ -170,6 +170,9 @@ Security findings get paid even without a fix: if you find anything that contrad
 | **Other launchpads** | Creator history for Bonk, Raydium LaunchLab and Meteora launches | `src/lib/scan/devprofile.js` |
 | **Firefox build** | MV3 service-worker differences | `manifest.json`, `src/background.js` |
 
+See [bot/router label evidence and coverage](docs/bot-labels.md) for registry sources and the
+distinction between an invoked program and an observed payment to a published fee recipient.
+
 ---
 
 ## Verify it isn't a drainer

@@ -4,6 +4,7 @@ import { PROGRAMS, AVG_SLOT_MS, LAMPORTS_PER_SOL } from '../constants.js';
 import { findProgramAddress, isOnCurve } from '../pda.js';
 import { decodeBase58 } from '../base58.js';
 import { parseTx, txInitialisesMint } from '../txparse.js';
+import { routesForTrade } from '../routes.js';
 
 export async function derivePumpAccounts(mint) {
   const mintBytes = decodeBase58(mint);
@@ -293,6 +294,7 @@ export function extractLaunchEvents(records, mint, creation) {
           tokens: t.tokenAmount,
           sol: t.quoteAmount,
           priceQuote: t.priceQuote,
+          routeEvidence: routesForTrade(rec, mint, t.user, t.outerIndex),
           isCreator: t.user === creator,
           slippageLimitSol: pumpIx?.solLimit ?? (pumpIx?.solIn ? pumpIx.solIn : null),
           pumpIxName: pumpIx?.name || null,
@@ -323,6 +325,7 @@ export function extractLaunchEvents(records, mint, creation) {
         tokens: Math.abs(d.delta),
         sol: solShare,
         priceQuote: null,
+        routeEvidence: routesForTrade(rec, mint, d.owner),
         isCreator: d.owner === creator,
         slippageLimitSol: pumpIx?.solLimit ?? null,
         pumpIxName: pumpIx?.name || null,

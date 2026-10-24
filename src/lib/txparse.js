@@ -1,5 +1,6 @@
 // Normalise a `jsonParsed` Solana transaction into the flat record the scanners work with.
 import { decodeBase58, encodeBase58, readU32LE, readU64LE } from './base58.js';
+import { routeEvidence } from './routes.js';
 import { PROGRAMS, PUMP_IX, PUMP_BUY_IX, PUMP_SELL_IX, PUMP_CREATE_IX, ANCHOR_EVENT_CPI, PUMP_EVENTS, JITO_TIP_ACCOUNTS, LAMPORTS_PER_SOL } from './constants.js';
 
 const DISC = Object.entries(PUMP_IX).map(([name, bytes]) => [name, bytes.join(',')]);
@@ -222,7 +223,7 @@ export function parseTx(tx, signatureHint) {
   const programs = []; // top-level program ids in order
   const ataCreates = [];
 
-  const visit = (ix, inner, depthProgram) => {
+  const visit = (ix, inner, depthProgram, outerIndex) => {
     const pid = ix.programId;
     if (pid === PROGRAMS.COMPUTE_BUDGET) {
       const d = safeDecode(ix.data);
@@ -274,7 +275,7 @@ export function parseTx(tx, signatureHint) {
     if (pid === PROGRAMS.PUMP) {
       const evt = inner ? decodePumpEvent(ix) : null;
       if (evt) {
-        pumpEvents.push(evt);
+        pumpEvents.push({ ...evt, outerIndex });
         return;
       }
       const dec = decodePumpIx(ix, signers);
@@ -285,9 +286,9 @@ export function parseTx(tx, signatureHint) {
 
   topIxs.forEach((ix, i) => {
     if (ix.programId !== PROGRAMS.COMPUTE_BUDGET) programs.push(ix.programId);
-    visit(ix, false, null);
+    visit(ix, false, null, i);
     const group = innerGroups.find((g) => g.index === i);
-    if (group) for (const inner of group.instructions) visit(inner, true, ix.programId);
+    if (group) for (const inner of group.instructions) visit(inner, true, ix.programId, i);
   });
 
   // Jito tip = system transfer to a tip account (anywhere) or SOL delta into a tip account
@@ -325,6 +326,7 @@ export function parseTx(tx, signatureHint) {
     tipAccount,
     programs,
     entryProgram,
+    routeEvidence: routeEvidence(tx),
     systemTransfers,
     splTransfers,
     pumpIxs,
