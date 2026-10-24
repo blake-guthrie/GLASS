@@ -9,7 +9,7 @@ import { ChromeStore, TtlCache, OperatorMemory } from './lib/cache.js';
 import { DEFAULTS } from './lib/constants.js';
 
 const store = new ChromeStore('local');
-const CACHE_PREFIX = 'report:v3:routes1:'; // invalidate reports without versioned route evidence
+const CACHE_PREFIX = 'report:v3:routes2:'; // invalidate reports predating the OKX router label
 const reportCache = new TtlCache(store, CACHE_PREFIX);
 const memory = new OperatorMemory(store);
 const MAX_CACHED_REPORTS = 40;

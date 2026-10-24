@@ -39,6 +39,27 @@ signal. Its popularity alone is not a link between traders.
 The receipt's invoking program is intentionally **not** added to the program registry:
 the captured association alone is not independent official attribution of that program.
 
+## OKX DEX router (program label added 2026-10-24)
+
+The [official Solana Swap Instructions reference](https://web3.okx.com/nl/onchainos/dev-docs/trade/dex-solana-swap-instruction)
+identifies `tx.to` as the OKX DEX router and includes
+`proVF4pMXVaYqmy4NjniPh4pqKNfMmsihgd4wdkCX3u` as an executable `programId` in its
+Solana example. This label is separate from the existing OKX CEX withdrawal-wallet entry.
+It names this documented program, not every OKX router version or the trader's identity.
+
+Captured finalized mainnet receipt
+[`4S5wKiPqsusdLYXRm8UPtto3EhbnnEwVfDRpXxh9iwWZzkxrE8aKwTWP4Ur7HW4GknS4rnoJtymY2p9AugD2HGYJ`](https://solscan.io/tx/4S5wKiPqsusdLYXRm8UPtto3EhbnnEwVfDRpXxh9iwWZzkxrE8aKwTWP4Ur7HW4GknS4rnoJtymY2p9AugD2HGYJ)
+has slot **460777709**, block time **1792829499**, version **0**, and no transaction error.
+The program executes at outer instruction **6** with nested token movements and successful
+runtime logs. Four inner invocations of the same program also appear; invocation alone is
+not enough for a wallet-specific route observation without a matching token-transfer path.
+
+`test/fixtures/okx-router-mainnet.json` preserves the raw JSON-RPC response retrieved from
+`https://api.mainnet-beta.solana.com` on 2026-10-24 using `getTransaction`, `jsonParsed`,
+`finalized`, and `maxSupportedTransactionVersion: 1`. Its SHA-256 is
+`8bf9aa5688dbf2bb396fb80290e657a05249127ff12e5b68c3826fac80ccbf5b`.
+The replay tests route labels only; they do not establish token creation or quote-price accuracy.
+
 ## Evidence limits
 
 - Labels require exact addresses and instruction roles. Mere account presence, standalone
@@ -52,9 +73,9 @@ the captured association alone is not independent official attribution of that p
   encodings or larger amounts can leave a route unlabelled; absence is **unknown**, not proof
   that a bot was not used. Top-level fee transfers are conservatively not attributed because
   their relationship to a particular swap cannot be established by a parent invocation.
-- This contribution adds one verified Maestro fee recipient and connects the existing
-  program registry. It does **not** add verified Axiom, BullX, GMGN, Trojan or Bloom addresses,
-  claim complete Maestro coverage, or identify launch tools from bot fees.
+- This contribution adds one verified Maestro fee recipient, the documented OKX DEX router,
+  and connects the program registry. It does **not** add verified Axiom, BullX, GMGN, Trojan
+  or Bloom addresses, claim complete Maestro/OKX coverage, or identify launch tools from bot fees.
 
 ## Updating and testing
 
@@ -70,3 +91,7 @@ boundaries. Synthetic launch metadata around the captured swap only supplies an 
 context; the test does not claim the swap was the token's creation. The panel test executes
 its real rendering method in Node with page startup disabled; it is not a browser runtime
 or live scan test. All tests are offline and make no RPC requests. `npm test` runs the full suite.
+
+`node --test test/okx-router.test.mjs` additionally replays the captured OKX transaction through
+the same parser, report, panel method and CLI formatter. Synthetic controls check unrelated
+account presence, nested mixed routes, failed calls, missing logs and unknown programs.
