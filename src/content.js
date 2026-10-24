@@ -4,6 +4,11 @@
   if (globalThis.__glassLoaded) return;
   globalThis.__glassLoaded = true;
 
+  const api = globalThis.browser ?? globalThis.chrome;
+  const backgroundHelp = globalThis.browser
+    ? 'Open about:debugging#/runtime/this-firefox → GLASS → Inspect.'
+    : 'Open chrome://extensions → GLASS → Errors / service worker.';
+
   const Sites = globalThis.GlassSites;
   const STAGE_LABELS = {
     resolve: 'Resolving token',
@@ -41,7 +46,7 @@
   const link = (a, kind = 'account', text) => `<a href="${solscan(a, kind)}" target="_blank" rel="noopener">${esc(text || short(a))}</a>`;
   let ICON_URL = null;
   try {
-    ICON_URL = chrome.runtime.getURL('icons/icon48.png');
+    ICON_URL = api.runtime.getURL('icons/icon48.png');
   } catch {
     ICON_URL = null;
   }
@@ -166,7 +171,7 @@ tr.how td { border-bottom: 1px solid #171b25; }
       this.onPointerUp = (e) => {
         if (this.drag?.moved) {
           const rect = this.root.getBoundingClientRect();
-          chrome.storage?.local?.set({ glassPanelPos: { x: rect.left, y: rect.top } }).catch?.(() => {});
+          api.storage?.local?.set({ glassPanelPos: { x: rect.left, y: rect.top } }).catch?.(() => {});
         }
         try {
           this.drag?.target?.releasePointerCapture?.(e.pointerId);
@@ -191,7 +196,7 @@ tr.how td { border-bottom: 1px solid #171b25; }
     }
     async restorePosition() {
       try {
-        const r = await chrome.storage.local.get(['glassPanelPos', 'glassPanelCollapsed']);
+        const r = await api.storage.local.get(['glassPanelPos', 'glassPanelCollapsed']);
         if (r.glassPanelPos) this.setPos(r.glassPanelPos);
         if (r.glassPanelCollapsed) {
           this.collapsed = true;
@@ -610,7 +615,7 @@ tr.how td { border-bottom: 1px solid #171b25; }
     }
     setCollapsed(v) {
       this.collapsed = v;
-      chrome.storage?.local?.set({ glassPanelCollapsed: v }).catch?.(() => {});
+      api.storage?.local?.set({ glassPanelCollapsed: v }).catch?.(() => {});
       this.render();
     }
     copyReport() {
@@ -673,7 +678,7 @@ tr.how td { border-bottom: 1px solid #171b25; }
     const others = (L.buyers || []).filter((b) => !clusterSet.has(b.wallet)).slice(0, 60).map((b) => ({ wallet: b.wallet, tokens: b.tokens, kind: b.kind || 'early' }));
     panel.liveRefreshing = true;
     try {
-      const res = await chrome.runtime.sendMessage({
+      const res = await api.runtime.sendMessage({
         type: 'refreshLive',
         mint: r.mint,
         cluster,
@@ -752,29 +757,39 @@ tr.how td { border-bottom: 1px solid #171b25; }
   let panel = null;
   let port = null;
   let pingTimer = null;
+  let retryTimer = null;
   let attempt = 0;
   const RETRY_MS = [500, 1200, 2500];
   let current = null; // identifier currently shown
   let lastHref = null;
 
-  function connect(identifier, hintIsMint, force = false) {
+  function disconnect() {
+    clearTimeout(retryTimer);
+    clearInterval(pingTimer);
     if (port) {
+      const old = port;
+      port = null;
       try {
-        port.disconnect();
+        old.disconnect();
       } catch {
         /* ignore */
       }
-      port = null;
     }
+  }
+
+  function connect(identifier, hintIsMint, force = false, preserveReport = false) {
+    disconnect();
     panel.error = null;
-    if (!force) panel.setReport(null, identifier);
+    if (!force && !preserveReport) panel.setReport(null, identifier);
     try {
-      port = chrome.runtime.connect({ name: 'glass-scan' });
+      port = api.runtime.connect({ name: 'glass-scan' });
     } catch (e) {
       panel.setError('GLASS was updated — reload this page to reconnect.');
       return;
     }
-    port.onMessage.addListener((msg) => {
+    const connectedPort = port;
+    connectedPort.onMessage.addListener((msg) => {
+      if (port !== connectedPort) return;
       if (!msg) return;
       if (msg.type === 'stage' || msg.type === 'done') {
         if (msg.report?.identifier !== identifier && msg.report?.mint !== identifier) return;
@@ -807,22 +822,21 @@ tr.how td { border-bottom: 1px solid #171b25; }
         }
       }
     });
-    port.onDisconnect.addListener(() => {
-      const err = chrome.runtime.lastError?.message || '';
+    connectedPort.onDisconnect.addListener(() => {
+      const err = api.runtime.lastError?.message || '';
+      if (port !== connectedPort) return;
       port = null;
       clearInterval(pingTimer);
-      if (panel.report?.finishedAt) return; // normal: scan finished and the worker went idle
+      stopLive();
       if (err) console.warn('[GLASS] worker port closed:', err);
       // The worker may still be starting up (cold start) — retry a few times before giving up.
       if (attempt < RETRY_MS.length && current?.identifier === identifier) {
         const wait = RETRY_MS[attempt++];
         panel.setError(`Connecting to the GLASS worker… (retry ${attempt}/${RETRY_MS.length})`);
-        setTimeout(() => current?.identifier === identifier && connect(identifier, hintIsMint, force), wait);
+        retryTimer = setTimeout(() => current?.identifier === identifier && connect(identifier, hintIsMint, force, true), wait);
         return;
       }
-      const hint = /Receiving end does not exist|Could not establish connection/i.test(err)
-        ? 'The background worker is not running. Open chrome://extensions → GLASS → click "Errors" (or "service worker") to see why, then reload this page.'
-        : 'Reload this page. If it keeps happening, open chrome://extensions → GLASS → "Errors".';
+      const hint = `Reload this page. ${backgroundHelp}`;
       panel.setError(`Lost connection to the GLASS worker${err ? ` (${err})` : ''}. ${hint}`);
     });
     port.postMessage({ type: 'scan', identifier, hintIsMint, force });
@@ -843,12 +857,12 @@ tr.how td { border-bottom: 1px solid #171b25; }
     if (href === lastHref) return;
     lastHref = href;
     const det = Sites?.detect(href);
-    if (!det) return;
-    if (!det.identifier) {
+    if (!det?.identifier) {
       // Not on a token page: hide the panel but keep state.
       if (panel) panel.host.style.display = 'none';
       current = null;
       stopLive();
+      disconnect();
       return;
     }
     if (!panel) {
@@ -863,7 +877,14 @@ tr.how td { border-bottom: 1px solid #171b25; }
     connect(det.identifier, det.hintIsMint);
   }
 
-  chrome.storage?.sync?.get('settings').then((r) => {
+  window.addEventListener('pagehide', () => {
+    disconnect();
+    stopLive();
+    current = null;
+    lastHref = null;
+  });
+
+  api.storage?.sync?.get('settings').then((r) => {
     const s = r?.settings || {};
     if (s.enabled === false) return;
     check();

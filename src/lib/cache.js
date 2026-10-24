@@ -1,3 +1,4 @@
+import { api } from './webext.js';
 // Storage abstraction: chrome.storage.local in the extension, an in-memory Map (optionally persisted to
 // a JSON file by the CLI) elsewhere. Also hosts the "operator memory" — wallets seen as launch buyers
 // on previously scanned tokens, so cross-launch clusters are recognised for free next time.
@@ -25,7 +26,7 @@ export class MemoryStore {
 
 export class ChromeStore {
   constructor(area = 'local') {
-    this.area = globalThis.chrome?.storage?.[area];
+    this.area = api?.storage?.[area];
   }
   async get(key) {
     const r = await this.area.get(key);
@@ -44,7 +45,7 @@ export class ChromeStore {
 }
 
 export function defaultStore() {
-  return globalThis.chrome?.storage?.local ? new ChromeStore('local') : new MemoryStore();
+  return api?.storage?.local ? new ChromeStore('local') : new MemoryStore();
 }
 
 /** TTL cache on top of a store. */
