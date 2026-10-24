@@ -562,7 +562,10 @@ tr.how td { border-bottom: 1px solid #171b25; }
         const lbl = b.routeLabel || '';
         const known = !/^[1-9A-HJ-NP-Za-km-z]{4}…[1-9A-HJ-NP-Za-km-z]{4}$/.test(lbl);
         const route = known ? esc(lbl) : `<span title="Unlabelled program ${esc(b.route || '')} — a trading bot / router GLASS has no name for yet (see bounties)">via ${esc(lbl)}</span>`;
-        return `${b.tip ? `<span title="paid a Jito tip of ${(b.tip / 1e9).toFixed(4)} SOL to land in a bundle">tip</span> · ` : ''}${route}`;
+        const evidence = [...new Map((b.routeEvidence || []).map((e) => [`${e.kind}:${e.address}`, e])).values()];
+        const observed = evidence.filter((e) => e.kind === 'fee' || e.address !== b.route).map((e) =>
+          `<span title="${esc(e.kind === 'fee' ? `Observed SOL payment to published fee recipient ${e.address}; not proof of program ownership or operator identity` : `Program ${e.address} invoked on this token transfer path`)}">${esc(e.label)}${e.kind === 'fee' ? ' fee payment' : ' program'}</span> ${e.signature ? link(e.signature, 'tx', 'receipt') : ''}`);
+        return `${b.tip ? `<span title="paid a Jito tip of ${(b.tip / 1e9).toFixed(4)} SOL to land in a bundle">tip</span> · ` : ''}${route}${observed.length ? `<br>${observed.join(' · ')}` : ''}`;
       };
       const rows = L.buyers.slice(0, 40).map((b) => {
         const p = prof.get(b.wallet);
@@ -571,7 +574,7 @@ tr.how td { border-bottom: 1px solid #171b25; }
         return `<tr><td>+${b.firstSlotOffset}</td><td>${link(b.wallet)}${kind ? `<span class="pill ${kind}" title="${esc(b.kindReason || '')}">${kind}</span>` : ''}</td><td class="num" title="${b.flipped ? `bought ${fmtPct(b.boughtPct)} and sold part or all of it again inside the launch window (flip)` : 'share of supply still held at the end of the launch window'}">${fmtPct(b.pct)}${b.flipped ? ' <span class="amber" title="flipped: sold inside the launch window">↺</span>' : ''}</td><td class="num">${fmtSol(b.sol)}</td><td class="num">${holdsCell(b.wallet)}</td><td class="muted" title="${esc((p?.flags || []).join('; '))}">${routeCell(b)}${fund}</td></tr>`;
       });
       const dev = L.creatorDevBuy;
-      const devRow = r.creation ? `<tr><td>0</td><td>${link(r.creation.creator)}<span class="pill" style="color:#c084fc">dev</span></td><td class="num">${fmtPct(dev.pct)}</td><td class="num">${fmtSol(dev.sol)}</td><td class="num">${holdsCell(r.creation.creator)}</td><td class="muted">create tx ${link(r.creation.sig, 'tx', 'view')}</td></tr>` : '';
+      const devRow = r.creation ? `<tr><td>0</td><td>${link(r.creation.creator)}<span class="pill" style="color:#c084fc">dev</span></td><td class="num">${fmtPct(dev.pct)}</td><td class="num">${fmtSol(dev.sol)}</td><td class="num">${holdsCell(r.creation.creator)}</td><td class="muted">create tx ${link(r.creation.sig, 'tx', 'view')}${dev.routeEvidence?.length ? `<br>${routeCell(dev)}` : ''}</td></tr>` : '';
       const inner = `<div class="tscroll"><table><tr><th title="Slots after the creation slot (0 = same block the token was created in; one slot ≈ ${r.slotMs || 400} ms)">slot</th><th title="Buyer wallet. Pill = GLASS classification (hover for why)">wallet</th><th class="num" title="Share of total token supply this wallet ended up with inside the launch window (net of anything it sold back). ↺ = bought and sold inside the window">% supply</th><th class="num" title="SOL the wallet spent on its launch buys">SOL paid</th><th class="num" title="Share of supply the wallet holds right now (0 = fully sold). Updates live.">holds now</th><th title="Which program the buy went through (pump.fun directly, or a router/bot), and how the wallet was funded">route · funding</th></tr>${devRow}${rows.join('')}</table></div>${L.buyers.length > 40 ? `<div class="note">${L.buyers.length - 40} more early buyers not shown.</div>` : ''}<div class="note">↺ = bought and sold again inside the launch window · "via XXXX…" = an unlabelled bot/router program · scroll sideways for more columns.</div>`;
       return this.sec('receipts', 'Receipts', `${L.buyers.length} early wallets`, inner);
     }

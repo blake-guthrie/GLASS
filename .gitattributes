@@ -1,0 +1,2 @@
+# Preserve the exact captured RPC response bytes and their documented SHA-256.
+test/fixtures/maestro-fee-mainnet.json -text

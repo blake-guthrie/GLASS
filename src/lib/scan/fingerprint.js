@@ -1,14 +1,15 @@
 // Stage 2: who bought in the launch window, how uniform their transactions were, and whether they
 // moved as one (same Jito bundle, same fee recipient, same settings).
-import { ROUTER_LABELS, PUMP_TOTAL_SUPPLY, LAMPORTS_PER_SOL } from '../constants.js';
+import { PUMP_TOTAL_SUPPLY, LAMPORTS_PER_SOL } from '../constants.js';
 import { pMap } from '../http.js';
+import { programLabel, botFee } from '../routes.js';
 
 const sig2 = (n) => (n == null ? 'na' : Number(n.toPrecision(2)));
 const slipBucket = (ev) => (ev.slippageLimitSol && ev.sol > 0 ? Math.round((ev.slippageLimitSol / ev.sol - 1) * 20) / 20 : 'na');
 
 export function routeLabel(programId) {
   if (!programId) return 'unknown';
-  return ROUTER_LABELS[programId] || `${programId.slice(0, 4)}…${programId.slice(-4)}`;
+  return programLabel(programId) || `${programId.slice(0, 4)}…${programId.slice(-4)}`;
 }
 
 export function fingerprintOf(ev) {
@@ -49,6 +50,7 @@ export function analyseLaunch(events, { supply = PUMP_TOTAL_SUPPLY, slotWindow =
         cuPrice: e.cuPrice,
         route: e.route,
         routeLabel: routeLabel(e.route),
+        routeEvidence: [],
         feeRecipients: new Set(),
         fingerprint: fingerprintOf(e),
         payer: e.payer,
@@ -64,6 +66,10 @@ export function analyseLaunch(events, { supply = PUMP_TOTAL_SUPPLY, slotWindow =
       b.solOut += e.sol;
     }
     b.txs.push(e.sig);
+    for (const evidence of e.routeEvidence || []) {
+      if (!b.routeEvidence.some((x) => x.signature === evidence.signature && x.kind === evidence.kind &&
+        x.address === evidence.address && x.outerIndex === evidence.outerIndex && x.instructionIndex === evidence.instructionIndex)) b.routeEvidence.push(evidence);
+    }
     if (e.payer && e.payer !== e.wallet) b.payers.add(e.payer);
     for (const r of e.externalFeeRecipients || []) b.feeRecipients.add(r);
     if (e.slotOffset < b.firstSlotOffset) b.firstSlotOffset = e.slotOffset;
@@ -112,7 +118,7 @@ export function analyseLaunch(events, { supply = PUMP_TOTAL_SUPPLY, slotWindow =
   // Shared external fee recipients (launch tool / bot fee wallets)
   const feeRec = new Map();
   for (const b of windowB) for (const r of b.feeRecipients) {
-    const x = feeRec.get(r) || { address: r, wallets: [] };
+    const x = feeRec.get(r) || { address: r, wallets: [], ...(botFee(r) ? { platform: true, label: `${botFee(r).label} fee account` } : {}) };
     x.wallets.push(b.wallet);
     feeRec.set(r, x);
   }
@@ -123,7 +129,8 @@ export function analyseLaunch(events, { supply = PUMP_TOTAL_SUPPLY, slotWindow =
 
   return {
     supply,
-    creatorDevBuy: { tokens: devBuyTokens, sol: devBuySol, pct: (devBuyTokens / supply) * 100, txs: creatorEv.map((e) => e.sig) },
+    creatorDevBuy: { tokens: devBuyTokens, sol: devBuySol, pct: (devBuyTokens / supply) * 100, txs: creatorEv.map((e) => e.sig),
+      route: creatorEv[0]?.route, routeLabel: routeLabel(creatorEv[0]?.route), routeEvidence: creatorEv.flatMap((e) => e.routeEvidence || []) },
     slot0: { count: slot0.length, tokens: sum(slot0, 'tokens'), sol: sum(slot0, 'sol'), pct: (sum(slot0, 'tokens') / supply) * 100, grossPct: (sum(slot0, 'bought') / supply) * 100 },
     window: { count: windowB.length, tokens: sum(windowB, 'tokens'), sol: sum(windowB, 'sol'), pct: (sum(windowB, 'tokens') / supply) * 100, grossPct: (sum(windowB, 'bought') / supply) * 100, flipped: flippedCount, slotWindow },
     early: { count: buyers.length, tokens: sum(buyers, 'tokens'), pct: (sum(buyers, 'tokens') / supply) * 100, seconds: earlyWindowSec },

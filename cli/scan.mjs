@@ -64,7 +64,10 @@ if (L) {
   console.log(`jito: ${L.jito.tippedCount} tipped (${(L.jito.tippedShare * 100).toFixed(0)}%), identical tip share ${(L.jito.identicalTipShare * 100).toFixed(0)}%, inferred bundles ${L.jito.inferredBundles.length}, confirmed multi-tx bundles ${L.jito.confirmedMultiTxBundles ?? 'n/a'}`);
   if (L.sharedFeeRecipients.length) console.log(`shared fee recipients: ${L.sharedFeeRecipients.map((x) => `${x.address} (${x.wallets.length})`).join(', ')}`);
   console.log(`launch-tool pattern: ${L.launchToolPattern.detected ? 'YES' : 'no'} — ${L.launchToolPattern.reasons.join('; ') || 'none'}`);
-  for (const b of L.buyers.slice(0, 12)) console.log(`  +${b.firstSlotOffset} ${b.wallet} ${fmtPct(b.pct)} ${b.sol.toFixed(3)}◎ tip ${b.tip} ${b.routeLabel}`);
+  for (const b of L.buyers.slice(0, 12)) {
+    const observed = [...new Set((b.routeEvidence || []).map((e) => `${e.label} ${e.kind === 'fee' ? 'fee payment' : 'program'}`))];
+    console.log(`  +${b.firstSlotOffset} ${b.wallet} ${fmtPct(b.pct)} ${b.sol.toFixed(3)}◎ tip ${b.tip} ${b.routeLabel}${observed.length ? `; observed: ${observed.join(', ')}` : ''}`);
+  }
 }
 if (report.wallets?.summary) {
   const s = report.wallets.summary;
