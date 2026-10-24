@@ -226,3 +226,10 @@ export async function jitoBundleId(sig) {
     return null;
   }
 }
+
+export function quoteToUsdMultiplier(quoteMint, solPrice) {
+  if (quoteMint === PROGRAMS.USDC) return 1;
+  if (!quoteMint || quoteMint === PROGRAMS.WSOL) return solPrice ?? null;
+  return null;
+}
+
