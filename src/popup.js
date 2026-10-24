@@ -1,8 +1,9 @@
 import { DEFAULTS } from './lib/constants.js';
+import { indexEndpoint } from './lib/shared-index.js';
 
 const $ = (id) => document.getElementById(id);
-const fields = ['rpcUrl', 'slotWindow', 'earlyWindowSec', 'maxWalletProfiles', 'maxPriorLaunches'];
-const checks = ['enabled', 'operatorHistory', 'liveTracking', 'jitoLookup'];
+const fields = ['rpcUrl', 'sharedIndexUrl', 'slotWindow', 'earlyWindowSec', 'maxWalletProfiles', 'maxPriorLaunches'];
+const checks = ['enabled', 'operatorHistory', 'liveTracking', 'jitoLookup', 'sharedIndexEnabled'];
 
 async function load() {
   const r = await chrome.storage.sync.get('settings');
@@ -16,28 +17,30 @@ function collect() {
   const s = {};
   for (const f of fields) {
     const v = $(f).value.trim();
-    s[f] = f === 'rpcUrl' ? v || DEFAULTS.rpcUrl : Number(v);
+    s[f] = f === 'rpcUrl' ? v || DEFAULTS.rpcUrl : f === 'sharedIndexUrl' ? v : Number(v);
   }
   for (const c of checks) s[c] = $(c).checked;
   return s;
 }
 
-async function ensureHostPermission(url) {
-  let origin;
+function ensureHostPermission(...urls) {
   try {
-    origin = new URL(url).origin + '/*';
+    const origins = [...new Set(urls.map((url) => { const u = new URL(url); return `${u.protocol}//${u.hostname}/*`; }))];
+    // Invoke request in the click gesture, before any await (including contains).
+    return chrome.permissions.request({ origins }).catch(() => false);
   } catch {
-    return false;
+    return Promise.resolve(false);
   }
-  const have = await chrome.permissions.contains({ origins: [origin] });
-  if (have) return true;
-  return chrome.permissions.request({ origins: [origin] });
 }
 
 $('save').addEventListener('click', async () => {
   const s = collect();
-  if (s.rpcUrl && !(await ensureHostPermission(s.rpcUrl))) {
-    status('saved', 'Permission for that RPC host was not granted.', 'bad');
+  if (s.sharedIndexEnabled) {
+    const endpoint = indexEndpoint(s.sharedIndexUrl);
+    if (!endpoint) return status('saved', 'Index URL must be HTTPS (or localhost HTTP), without credentials or query parameters.', 'bad');
+  }
+  if (!(await ensureHostPermission(s.rpcUrl, ...(s.sharedIndexEnabled ? [s.sharedIndexUrl] : [])))) {
+    status('saved', 'Permission for the configured hosts was not granted.', 'bad');
     return;
   }
   await chrome.storage.sync.set({ settings: s });

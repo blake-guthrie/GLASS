@@ -7,6 +7,7 @@ import { LiveWatcher, wsUrlFor } from './lib/livewatch.js';
 import { computeScore } from './lib/scan/score.js';
 import { ChromeStore, TtlCache, OperatorMemory } from './lib/cache.js';
 import { DEFAULTS } from './lib/constants.js';
+import { lookupSharedSnapshot, snapshotReport } from './lib/shared-index.js';
 
 const store = new ChromeStore('local');
 const CACHE_PREFIX = 'report:v3:'; // bump when the report shape changes so old cached reports can't break the panel
@@ -86,6 +87,15 @@ async function startScan(key, identifier, hintIsMint, port, force) {
   const rpc = makeRpc(settings);
   const heartbeat = setInterval(() => broadcast(job, { type: 'tick', rpcCalls: rpc.totalCalls, degraded: rpc.totalDegraded }), 15_000);
   try {
+    if (!force && !servedCached && hintIsMint) {
+      const hit = await lookupSharedSnapshot(identifier, settings, { signal: job.abort });
+      if (job.abort.aborted) return;
+      if (hit) {
+        job.report = snapshotReport(hit);
+        broadcast(job, { type: 'done', report: job.report, shared: true });
+        return; // Shared snapshots never enter the local report cache or operator memory.
+      }
+    }
     const report = await runScan(rpc, identifier, {
       settings,
       memory,

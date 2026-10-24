@@ -1,0 +1,18 @@
+{
+  "dataDir": "/srv/glass-worker/data",
+  "host": "127.0.0.1",
+  "port": 8788,
+  "worker": {
+    "pageSize": 100,
+    "pagesPerTick": 2,
+    "signaturesPerTick": 20,
+    "maxPending": 2000,
+    "maxJobs": 5000,
+    "pollMs": 3000,
+    "maxAttempts": 5,
+    "retryMs": 5000,
+    "retentionMs": 86400000,
+    "scanDelayMs": 65000
+  },
+  "scan": {}
+}
