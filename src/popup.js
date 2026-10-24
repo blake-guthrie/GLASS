@@ -88,7 +88,14 @@ async function refreshStats() {
     return;
   }
   $('stats').style.color = '';
-  $("stats").textContent = `${r.memory?.tokens ?? 0} tokens · ${r.memory?.wallets ?? 0} wallets · ${r.memory?.reputations ?? 0} reputations remembered · ${r.cachedReports} cached reports${r.inflight ? ` · ${r.inflight} scan running` : ''}`;
+  const { memory, cachedReports, inflight } = r;
+  let text = `${memory?.tokens ?? 0} tokens · ${memory?.wallets ?? 0} wallets · ${memory?.reputations ?? 0} reputations remembered · ${cachedReports} cached reports`;
+  if (inflight) text += ` · ${inflight} scan running`;
+  // Add market cap for USDC-quoted pairs if available
+  if (r.marketCap && r.marketCap.usdc) {
+    text += ` · USDC market cap: $${r.marketCap.usdc.toLocaleString()}`;
+  }
+  $("stats").textContent = text;
 }
 
 function status(id, text, cls = '') {
