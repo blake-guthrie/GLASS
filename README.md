@@ -105,6 +105,10 @@ Launch tools now fund their wallets through exchanges, fee-payers and closed WSO
 
 *Chrome Web Store listing: coming soon.*
 
+**Optional community pre-scans:** [Run the zero-dependency worker and shared index](worker/README.md), or opt into an operator's index in the popup. It is off by default. A matching fresh snapshot shows its source and age; missing or invalid results use the normal local scan. The operator sees the queried public mint and connection IP, never your RPC settings or local memory. Use **↻** for a local scan with full receipts.
+
+**Similar launches:** the same optional index can [retain and compare behavioral launch history](worker/SIMILAR.md), including rotated wallets. The panel explains transaction configuration, funding style, sniper mix and launch-slot shape separately, with observed outcome denominators. Resemblance suggests a possible shared operator; it does not establish identity or predict returns. No historical corpus is bundled.
+
 ---
 
 ## $GLASS
@@ -179,7 +183,7 @@ Don't trust an extension that sits on your trading terminal because a README say
 **1. It cannot touch your wallet.** In `manifest.json`:
 - `permissions` contains only `storage` (its own settings and cache). There is no `tabs`, `cookies`, `webRequest`, `scripting`, `clipboardRead`, `downloads` or `nativeMessaging`.
 - Content scripts run only on the listed terminal domains, never on wallet extensions, exchanges, or any page where you'd type a seed phrase.
-- `host_permissions` lists only RPC providers and the public read APIs GLASS uses. `optional_host_permissions` is requested only if *you* enter a custom RPC URL.
+- `host_permissions` lists only RPC providers and the public read APIs GLASS uses. `optional_host_permissions` covers the RPC or optional index hosts you select in settings; no index is enabled by default.
 
 **2. It never asks you to sign anything.**
 

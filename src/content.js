@@ -231,8 +231,9 @@ tr.how td { border-bottom: 1px solid #171b25; }
       const scrollTop = prevBody ? prevBody.scrollTop : 0;
       const r = this.report;
       const tone = r?.score?.verdict?.tone || 'na';
-      const scoreTxt = r?.score ? String(r.score.score) : '…';
-      const headerTitle = r?.market?.symbol || r?.creation?.symbol ? `$${esc(r.market?.symbol || r.creation?.symbol)}` : 'GLASS';
+      const scoreTxt = r?.sharedIndex ? String(r.sharedIndex.snapshot.risk.score) : r?.score ? String(r.score.score) : '…';
+      const symbol = r?.sharedIndex?.snapshot.symbol || r?.market?.symbol || r?.creation?.symbol;
+      const headerTitle = symbol ? `$${esc(symbol)}` : 'GLASS';
       this.root.className = `wrap${this.collapsed ? ' collapsed' : ''}`;
       this.root.innerHTML = `
         <div class="head" part="head">
@@ -259,6 +260,7 @@ tr.how td { border-bottom: 1px solid #171b25; }
       if (this.error && !r) return `<div class="err">${esc(this.error)}</div>`;
       const errBanner = this.error && r && !r.finishedAt ? `<div class="err">${esc(this.error)}</div>` : '';
       if (!r) return `<div class="stages">${STAGE_ORDER.map((s) => `<span class="stg">${STAGE_LABELS[s]}</span>`).join('')}</div><div class="skl"></div><div class="skl" style="width:70%"></div>`;
+      if (r.sharedIndex) return this.renderSharedSnapshot(r.sharedIndex) + this.renderSimilarLaunches(r.similarLaunches);
       const parts = [];
       if (errBanner) parts.push(errBanner);
       // stages strip
@@ -283,10 +285,40 @@ tr.how td { border-bottom: 1px solid #171b25; }
       if (r.wallets || r.stages?.wallets?.status === 'running') parts.push(this.secWallets(r));
       if (r.launch) parts.push(this.secReceipts(r));
       if (r.score) parts.push(this.secScore(r));
+      parts.push(this.renderSimilarLaunches(r.similarLaunches));
       return parts.join('');
     }
     sec(id, title, sub, inner) {
       return `<div class="sec ${this.open[id] ? 'open' : ''}" data-sec="${id}"><div class="sh" data-toggle="${id}"><span>${title}</span><span class="sub">${sub || ''}</span><span class="chev">›</span></div><div class="sc">${inner}</div></div>`;
+    }
+    renderSimilarLaunches(h) {
+      if (!h) return '';
+      const s = h.summary,c = h.coverage;
+      const components = (m) => ['transaction','funding','sniper','shape'].map((d) => `${d}: ${m.components[d].toFixed(1)}/100 (${Math.round(m.coverage[d]*100)}% coverage; 25% weight)`).join(' · ');
+      const rows = h.matches.map((m) => `<li>${link(m.mint)} · ${m.score.toFixed(1)}/100 resemblance · ${esc(m.source)}<br>${esc(components(m))}<br>Exact-wallet evidence, separate from score: ${m.exactWalletEvidence.sameReportedCreator ? 'same reported creator' : 'different or unknown creator'}; ${m.exactWalletEvidence.sharedLaunchBuyers} shared launch buyers.</li>`).join('');
+      return `<div class="note"><strong>Similar launches</strong> · configured history from ${esc(h.origin)}, not independently verified.<br>
+        ${s.matchedLaunches} matched of ${c.eligibleLaunches} eligible launches in the ${h.windowDays} days before this launch; showing ${h.matches.length}. Behavioral resemblance may suggest a shared operator; it does not establish identity or predict returns.<br>
+        Median observed peak: ${s.medianObservedPeakMultiple == null ? 'unknown' : `${s.medianObservedPeakMultiple.toFixed(2)}×`} (${s.knownPeaks} known / ${s.unknownPeaks} unknown). Baseline: first observed USD token price within 5 minutes; peak: same-source samples within 24 hours, not ATH.<br>
+        Sold at least 50% of the initial launch cluster within 90 minutes: ${s.knownExitWindows ? `${s.rapidDumps}/${s.knownExitWindows} (${Math.round(s.rapidDumpFraction*100)}%)` : 'unknown (0 complete windows)'}; ${s.unknownExitWindows} unknown windows. Only observations available before this launch count.<br>
+        Method ${esc(h.method)}: minimum ${h.rules.threshold}/100 overall, ${h.rules.dimensionFloor}/100 and ${Math.round(h.rules.coverageFloor*100)}% coverage in every dimension; at least ${h.rules.minimumBuyers} buyers and funding profiles. Common infrastructure and sparse samples are excluded.<br>
+        Retained ${c.storedRecords} records; ${c.evictedCapacity} capacity / ${c.evictedRetention} age evictions. Collection began ${esc(new Date(c.collectionStartedAt).toISOString())}; this is a bounded sample, not all launches. ${c.duplicateRecords} duplicate records removed; ${c.excludedRecords} current, future, outside-window or incompatible records excluded.
+        ${rows ? `<ul>${rows}</ul>` : '<p>No qualifying resemblance in the available sample.</p>'}</div>`;
+    }
+    renderSharedSnapshot(hit) {
+      const s = hit.snapshot;
+      const count = (n) => n == null ? 'unknown' : String(n);
+      return `<div class="note">Community snapshot from ${esc(hit.origin)} · ${ago(s.scannedAt)}. Trusted operator result, not independently verified. Use ↻ for a local scan and full receipts.</div>
+        <div class="verdict"><h1>${esc(s.risk.headline || 'Scan result')}</h1><p>Risk ${count(s.risk.score)}/100 · ${esc(s.risk.word || '')} · ${esc(s.risk.confidence || 'unknown')} confidence</p>
+        ${s.risk.why.length ? `<ul class="why">${s.risk.why.map((v) => `<li>${esc(v)}</li>`).join('')}</ul>` : ''}
+        ${s.risk.gaps.length ? `<div class="gaps">Not yet known: ${esc(s.risk.gaps.join(' · '))}</div>` : ''}</div>
+        <div class="kv"><span class="k">Token</span><span class="v">${esc(s.name || s.mint)}${s.symbol ? ` · ${esc(s.symbol)}` : ''}</span>
+        <span class="k">Creator</span><span class="v">${s.creator ? link(s.creator) : 'unknown'}</span>
+        <span class="k">Dev buy</span><span class="v">${fmtPct(s.launch.devPct)}</span>
+        <span class="k">Launch window</span><span class="v">${fmtPct(s.launch.windowPct)}</span>
+        <span class="k">Bundle / sniper / organic</span><span class="v">${fmtPct(s.launch.bundlePct)} / ${fmtPct(s.launch.sniperPct)} / ${fmtPct(s.launch.organicPct)}</span>
+        <span class="k">Dev history</span><span class="v">${s.history.enabled ? `${count(s.history.totalCreated)}${s.history.atLeast ? '+' : ''} launches · ${count(s.history.rated)} rated · ${esc(s.history.label || 'unknown')}` : 'disabled by worker'}</span>
+        <span class="k">Cluster holds / sold</span><span class="v">${s.flow.enabled ? `${fmtPct(s.flow.holdsPct)} / ${fmtPct(s.flow.soldPct)}` : 'disabled by worker'}</span>
+        <span class="k">Coverage</span><span class="v">${count(s.launch.transactions)} transactions · ${count(s.launch.blocks)} blocks · ${s.coverage.degraded} degraded requests</span></div>`;
     }
     secMarket(r) {
       const m = r.market || {};
@@ -618,6 +650,11 @@ tr.how td { border-bottom: 1px solid #171b25; }
       if (!r) return;
       const L = r.launch;
       const lines = [];
+      if (r.sharedIndex) {
+        const { snapshot: s, origin } = r.sharedIndex;
+        navigator.clipboard?.writeText(`GLASS community snapshot: ${s.mint}\n${s.risk.score}/100 — ${s.risk.headline || 'Unknown'}\nSource: ${origin}; scanned ${new Date(s.scannedAt).toISOString()}. Not independently verified. Use a local scan for full receipts.`).catch(() => {});
+        return;
+      }
       lines.push(`GLASS ${r.score?.score ?? '?'}/100 — ${r.market?.name || ''} ($${r.market?.symbol || ''}) ${r.mint}`);
       if (r.score?.call) lines.push(`${r.score.call.word.toUpperCase()} (${r.score.call.confidence} confidence): ${r.score.call.why.join('; ')}`);
       if (r.score?.verdict) lines.push(`${r.score.verdict.headline}. ${r.score.verdict.sub}`);
