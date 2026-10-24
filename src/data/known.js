@@ -20,6 +20,18 @@ export default {
   },
   programs: {
     'BSfD6SHZigAfDWSjzD5Q41jw8LmKwtmjskPH9XW1mrRW': 'Photon',
+    // Solana router, not the CEX wallet above. Official source and captured receipt: docs/bot-labels.md.
+    // https://web3.okx.com/nl/onchainos/dev-docs/trade/dex-solana-swap-instruction (reviewed 2026-10-24)
+    'proVF4pMXVaYqmy4NjniPh4pqKNfMmsihgd4wdkCX3u': 'OKX DEX router',
+  },
+  // Solana mainnet fee recipients, distinct from executable programs and launcher wallets.
+  // Registry revision 1, reviewed 2026-10-24. See docs/bot-labels.md for evidence and coverage.
+  botFees: {
+    'MaestroUL88UBnZr3wfoN7hqmNWFi3ZYCGqZoJJHE36': {
+      label: 'Maestro', role: 'native-sol-fee-recipient',
+      source: 'https://docs.maestrobots.com/sniper/monetization',
+      verifiedAt: '2026-10-24',
+    },
   },
   // Fee / tip wallets of launch tools (Proxima, Sumo, Fortune, Rapid Launch, ...). GLASS discovers shared
   // non-protocol fee recipients per launch automatically; add confirmed ones here to label them by name.

@@ -27,7 +27,7 @@ export const ROUTER_LABELS = {
   [PROGRAMS.RAYDIUM_CPMM]: 'Raydium CPMM',
   [PROGRAMS.METEORA_DLMM]: 'Meteora',
   'BSfD6SHZigAfDWSjzD5Q41jw8LmKwtmjskPH9XW1mrRW': 'Photon',
-  // Add more router/bot program IDs in src/data/known.json → "programs". Unknown routers are
+  // Add more router/bot program IDs in src/data/known.js → programs. Unknown routers are
   // still fingerprinted by address, they just display truncated.
 };
 

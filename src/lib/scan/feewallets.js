@@ -6,10 +6,13 @@
 //   • a launch tool's or operator's own fee wallet — few payers, all from the same launches.
 // We tell them apart by looking at who else paid the wallet in its last dozen transactions.
 import { parseTx } from '../txparse.js';
+import { botFee } from '../routes.js';
 
 const memo = new Map();
 
 export async function classifyFeeWallet(rpc, address, { memory } = {}) {
+  const known = botFee(address);
+  if (known) return { address, platform: true, label: `${known.label} fee account (official label; shared use does not identify an operator)`, source: known.source, payers: null, mints: null, perMinute: null };
   const hit = memo.get(address);
   if (hit && hit.exp > Date.now()) return hit.v;
   // local memory (persisted across scans)
@@ -60,7 +63,7 @@ export async function annotateFeeWallets(rpc, analysis, { memory, max = 3 } = {}
     f.mintsSeen = c.mints;
     f.perMinute = c.perMinute;
     f.flatFee = c.flatFee;
-    f.label = c.platform ? 'trading bot / terminal fee account (many unrelated traders pay it)' : c.payers != null ? `only ${c.payers} payer${c.payers === 1 ? '' : 's'} in its recent history${c.mints ? `, across ${c.mints} token${c.mints === 1 ? '' : 's'}` : ''} — private launch-tool or operator fee wallet` : 'unclassified fee wallet';
+    f.label = c.label || (c.platform ? 'trading bot / terminal fee account (many unrelated traders pay it)' : c.payers != null ? `only ${c.payers} payer${c.payers === 1 ? '' : 's'} in its recent history${c.mints ? `, across ${c.mints} token${c.mints === 1 ? '' : 's'}` : ''} — private launch-tool or operator fee wallet` : 'unclassified fee wallet');
   }
   return list;
 }
