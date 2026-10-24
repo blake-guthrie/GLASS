@@ -445,12 +445,15 @@ function mcapAtTime(hist, tMs) {
 export function rateOperator(launches, current = {}) {
   const usable = launches.filter((l) => l.peakMcapUsd != null);
   const n = usable.length;
-  const profile = current.profile?.available ? current.profile : null;
-  const result = { launches: launches.length, rated: n, score: null, label: 'Unrated', reasons: [], exit: null, stats: null, profile: profile ? profileSummary(profile) : null };
+  // Pump thresholds/archetypes describe only the pump record, never other launchpads.
+  const fullProfile = current.profile?.available ? current.profile : null;
+  const profile = fullProfile?.source === 'creator-history' ? fullProfile.pumpProfile : fullProfile;
+  const result = { launches: launches.length, rated: n, score: null, label: 'Unrated', reasons: [], exit: null, stats: null, profile: fullProfile ? profileSummary(fullProfile) : null };
   if (n === 0) {
-    if (profile?.archetype?.kind === 'first') result.reasons.push('First token from this creator wallet (pump.fun record). No history to judge — treat as unknown.');
+    if (fullProfile?.source === 'creator-history') result.reasons.push(`${launches.length} prior launches found; market outcomes are unavailable. Creator history coverage is partial.`);
+    else if (profile?.archetype?.kind === 'first') result.reasons.push('First token from this creator wallet (pump.fun record). No history to judge — treat as unknown.');
     else if (profile) result.reasons.push(`pump.fun lists ${profile.totalCreated} token(s) from this wallet but none has a recorded peak yet.`);
-    else result.reasons.push('No prior launches found for this cluster (first launch, wallets rotated per launch, or pump.fun history unavailable).');
+    else result.reasons.push(launches.length ? `${launches.length} prior launches found; market outcomes are unavailable. Creator history coverage is partial.` : 'No prior launches found for this cluster (first launch, wallets rotated per launch, or history unavailable).');
     return result;
   }
   const peaks = usable.map((l) => l.peakMcapUsd);
@@ -557,6 +560,7 @@ export function rateOperator(launches, current = {}) {
 export function profileSummary(p) {
   return {
     source: p.source,
+    coverage: p.coverage,
     creator: p.creator,
     totalCreated: p.totalCreated,
     exact: p.exact,

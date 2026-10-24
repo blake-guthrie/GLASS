@@ -6,6 +6,7 @@
 // here returns `{ available: false }` and the on-chain sampling in operator.js still runs.
 import { fetchJson } from '../http.js';
 import { SOURCES } from '../constants.js';
+import { fetchLaunchpadHistory } from './launchpads.js';
 
 const PAGE = 70; // the API returns at most ~70 coins per request regardless of `limit`
 const MAX_COUNT = 20_000; // stop counting here ("20,000+")
@@ -110,9 +111,9 @@ async function countCreated(creator, firstPageLen) {
  * @returns {{available:boolean, creator, totalCreated, exact, atLeast, firstCreatedAt, lastCreatedAt, perDay,
  *            last24h, last7d, sample:[], stats, archetype, current}}
  */
-export async function creatorProfile(creator, { currentMint, log = () => {}, samplePages = 3 } = {}) {
+async function pumpCreatorProfile(creator, { currentMint, log = () => {}, samplePages = 3 } = {}) {
   if (!creator) return { available: false, reason: 'no creator' };
-  return cached(`profile:${creator}:${samplePages}`, 90_000, async () => {
+  return cached(`profile:${creator}:${samplePages}:${currentMint || ''}`, 90_000, async () => {
     let page;
     try {
       page = await fetchCreatorCoins(creator, { offset: 0, limit: PAGE });
@@ -174,6 +175,37 @@ export async function creatorProfile(creator, { currentMint, log = () => {}, sam
       current,
     };
   });
+}
+
+/** Without rpc, retain the pump.fun API contract. The scan pipeline supplies its
+ * selected history RpcClient to add bounded, explicitly partial non-pump history.
+ */
+export async function creatorProfile(creator, options = {}) {
+  const pumpPromise = pumpCreatorProfile(creator, options);
+  if (!options.rpc) return pumpPromise;
+  const [pump, history] = await Promise.all([pumpPromise, fetchLaunchpadHistory(options.rpc, creator, options.launchpadHistory)]);
+  const coverage = {
+    'pump.fun': { status: pump.available ? pump.exact && !pump.sampleFull ? 'complete' : 'partial' : 'unavailable', countExact: !!pump.exact, totalCreated: pump.totalCreated ?? null, reason: pump.reason || 'pump.fun creator record; outcomes may be sampled.' },
+    ...history.coverage,
+  };
+  const known = new Map([...(pump.sample || []), ...(pump.current ? [pump.current] : [])].map((c) => [c.mint, c]));
+  let added = 0;
+  for (const c of history.coins) if (!known.has(c.mint)) { known.set(c.mint, c); added++; }
+  if (!added && pump.available) return { ...pump, coverage };
+  if (!pump.available && !history.coverage.bonk.pages) return { ...pump, coverage };
+  const coins = [...known.values()].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0) || a.mint.localeCompare(b.mint));
+  // A sampled pump record cannot prove non-overlap with every older pump row.
+  const total = pump.available && pump.exact && !pump.sampleFull ? pump.totalCreated + added : Math.max(pump.totalCreated || 0, coins.length);
+  return {
+    available: true, source: 'creator-history', creator,
+    totalCreated: total, exact: false, atLeast: true,
+    firstCreatedAt: null, lastCreatedAt: null, spanDays: null, perDay: null,
+    last24h: null, last7d: null, last24hAtLeast: false, last7dAtLeast: false,
+    sampleFull: true, sample: coins.filter((c) => c.mint !== options.currentMint),
+    current: known.get(options.currentMint) || null,
+    stats: { n: 0 }, archetype: { kind: 'partial', label: 'Partial creator history' },
+    pumpProfile: pump.available ? pump : null, coverage,
+  };
 }
 
 function quantile(sorted, qq) {
@@ -251,7 +283,7 @@ export function toPriorLaunches(profile, creator) {
     symbol: c.symbol,
     url: c.url,
     createdAt: c.createdAt,
-    createdSlot: null,
+    createdSlot: c.createdSlot ?? null,
     creator,
     relation: 'created',
     clusterWallets: [creator],
@@ -259,7 +291,7 @@ export function toPriorLaunches(profile, creator) {
     buys: [],
     sells: [],
     viaInfra: false,
-    linkedBy: [{ wallet: creator, how: "this token's creator wallet also created it (pump.fun record)" }],
+    linkedBy: [{ wallet: creator, how: c.source ? `designated creator in ${c.source} initialization (${c.signature || 'transaction unavailable'})` : "this token's creator wallet also created it (pump.fun record)" }],
     peakMcapUsd: c.athMcapUsd,
     minutesToPeak: c.minutesToPeak,
     nowMcapUsd: c.nowMcapUsd,
@@ -268,8 +300,13 @@ export function toPriorLaunches(profile, creator) {
     outcome: outcomeOf(c),
     clusterExit: null,
     historyAvailable: c.athMcapUsd != null,
-    source: 'pump.fun',
-    dexId: c.graduated ? 'pumpswap' : 'pumpfun',
+    source: c.source || 'pump.fun',
+    dexId: c.source ? null : c.graduated ? 'pumpswap' : 'pumpfun',
+    program: c.program,
+    platform: c.platform ?? null,
+    platformName: c.platformName ?? null,
+    creationSignature: c.signature ?? null,
+    quoteMint: c.quoteMint ?? null,
   }));
 }
 

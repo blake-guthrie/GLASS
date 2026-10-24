@@ -78,7 +78,8 @@ if (report.live?.summary) {
 if (report.operator) {
   const o = report.operator;
   const pf = o.profile;
-  console.log(`\nDev history: ${pf ? `${pf.totalCreated}${pf.atLeast ? '+' : ''} tokens launched by this wallet (pump.fun) · ${pf.archetype?.label || ''}` : `pump.fun record unavailable${o.profileError ? ` (${o.profileError})` : ''}`} · ${o.discovered} prior launch(es) linked${o.rating ? ` — ${o.rating.label} ${o.rating.score ?? ''}` : ''}`);
+  const profileSource = pf?.source === 'creator-history' ? 'multiple launchpads; partial coverage' : pf?.source || 'source unknown';
+  console.log(`\nDev history: ${pf ? `${pf.totalCreated}${pf.atLeast ? '+' : ''} tokens launched by this wallet (${profileSource}) · ${pf.archetype?.label || ''}` : `${o.coverage ? 'creator records unavailable' : 'pump.fun record unavailable'}${o.profileError ? ` (${o.profileError})` : ''}`} · ${o.discovered} prior launch(es) linked${o.rating ? ` — ${o.rating.label} ${o.rating.score ?? ''}` : ''}`);
   for (const r of o.rating?.reasons || []) console.log(`  - ${r}`);
   for (const l of (o.launches || []).slice(0, 15)) console.log(`  ${l.relation.padEnd(7)} ${l.symbol || '?'} ${l.mint} peak ${fmtUsd(l.peakMcapUsd)} @${fmtMin(l.minutesToPeak)} now ${fmtUsd(l.nowMcapUsd)} ${l.graduated ? 'GRAD' : ''} ${l.outcome} ${l.clusterExit?.sells ? `cluster sold +${l.clusterExit.firstSellMin}m` : ''}`);
   if (o.rating?.exit) {
