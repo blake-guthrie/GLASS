@@ -3,14 +3,16 @@ import { DEFAULTS } from '../src/lib/constants.js';
 import { isBase58Signature } from '../src/lib/base58.js';
 import { publicSnapshot, validateSnapshot } from '../src/lib/shared-index.js';
 import { creationMints, mintAuthority, supportsQuote } from './feed.mjs';
+import { LaunchHistory } from './history.mjs';
 
 export const WORKER_DEFAULTS = { pageSize: 100, pagesPerTick: 2, signaturesPerTick: 20,
   maxPending: 2000, maxJobs: 5000, maxAttempts: 5, retryMs: 5000,
   pollMs: 3000, retentionMs: 86_400_000, scanDelayMs: 65_000 };
 
 export class PrescanWorker {
-  constructor({ rpc, store, settings = {}, config = {}, scan = runScan, now = Date.now }) {
+  constructor({ rpc, store, settings = {}, config = {}, history = {}, scan = runScan, now = Date.now }) {
     this.rpc = rpc; this.store = store; this.scan = scan; this.now = now;
+    this.history = new LaunchHistory(store.directory, history, now);
     this.settings = { ...DEFAULTS, ...settings }; this.config = { ...WORKER_DEFAULTS, ...config };
     const scanBounds = { slotWindow: 20, earlyWindowSec: 300, maxWalletProfiles: 100, maxPriorLaunches: 30, maxOperatorWallets: 50 };
     const scanKeys = [...Object.keys(scanBounds), 'operatorHistory', 'liveTracking', 'jitoLookup'];
@@ -25,6 +27,7 @@ export class PrescanWorker {
       || this.config.maxPending > 100_000 || this.config.maxJobs > 100_000 || this.config.maxAttempts > 100) throw new Error('worker-bounds-exceeded');
   }
   async initialize() {
+    this.store.history = await this.history.open();
     this.authority = await mintAuthority();
     const state = this.store.state;
     if (state.authority && state.authority !== this.authority) throw new Error('state-authority-mismatch');
@@ -48,7 +51,9 @@ export class PrescanWorker {
       published: jobs.filter((j) => j.status === 'published').length,
       lagSeconds: oldest ? Math.max(0, Math.floor((this.now()-oldest)/1000)) : 0,
       cursorGaps: s.cursorGaps, lastError: s.lastError,
-      coverage: 'bounded polling; provider retention and worker capacity can leave gaps' };
+      historyRecords: Object.keys(this.history.state.records).length,
+      historyUnavailable: jobs.filter((j) => j.historyReason).length,
+      coverage: 'bounded polling and retained history; provider retention and worker capacity can leave gaps' };
   }
   async poll(signal) {
     const s = this.store.state, c = this.config;
@@ -134,6 +139,13 @@ export class PrescanWorker {
       if (report?.mint !== job.mint) throw new Error('scan-mint-mismatch');
       const snapshot = publicSnapshot(report, this.settings);
       if (!validateSnapshot(snapshot, { mint: job.mint, settings: this.settings, now: this.now() })) throw new Error('invalid-snapshot');
+      try {
+        await this.history.archive(report, this.settings, job.quoteMint);
+        job.historyReason = null;
+      } catch (e) {
+        if (!['invalid-history-report','incomplete-history-window','invalid-history-record'].includes(e.message)) throw e;
+        job.historyReason = 'report-lacks-valid-behavioral-history';
+      }
       await this.store.writeReport(snapshot); // publish first; restart detects this if state save is interrupted
       job.status = 'published'; job.publishedAt = snapshot.scannedAt; job.reason = null;
     } catch {
@@ -156,6 +168,7 @@ export class PrescanWorker {
     if (this.running) throw new Error('tick-already-running');
     this.running = true;
     try {
+      await this.history.prune();
       for (const [mint, job] of Object.entries(this.store.state.jobs)) {
         if (job.status === 'published' && this.now()-(job.publishedAt || 0) > this.config.retentionMs) {
           await this.store.removeReport(mint); delete this.store.state.jobs[mint];

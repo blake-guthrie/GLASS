@@ -14,5 +14,11 @@
     "retentionMs": 86400000,
     "scanDelayMs": 65000
   },
-  "scan": {}
+  "scan": {},
+  "history": {
+    "source": "worker",
+    "maxRecords": 2000,
+    "retentionDays": 90,
+    "queryDays": 30
+  }
 }

@@ -13,6 +13,13 @@ export function indexServer(store, status, settings = {}) {
     try {
       if (req.method !== 'GET') return reply(405, { error: 'read-only' });
       if (req.url === '/v1/status') return reply(200, status());
+      const similar = /^\/v1\/similar\/([1-9A-HJ-NP-Za-km-z]+)$/.exec(req.url);
+      if (similar && isBase58Address(similar[1])) {
+        const result = store.history?.query(similar[1],settings);
+        if (!result) return reply(404,{ error:'history-not-ready' });
+        if (Buffer.byteLength(JSON.stringify(result)) > INDEX_MAX_BYTES) return reply(503,{ error:'history-response-too-large' });
+        return reply(200,result);
+      }
       const match = /^\/v1\/reports\/([1-9A-HJ-NP-Za-km-z]+)$/.exec(req.url);
       if (!match || !isBase58Address(match[1])) return reply(404, { error: 'not-found' });
       const stored = await store.readReport(match[1]);

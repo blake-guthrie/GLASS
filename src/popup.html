@@ -44,9 +44,9 @@
 
     <section>
       <h2>Community pre-scan index</h2>
-      <label class="check"><input type="checkbox" id="sharedIndexEnabled" /> Use a trusted operator's pre-scanned results</label>
+      <label class="check"><input type="checkbox" id="sharedIndexEnabled" /> Use an operator's pre-scans and similar-launch history</label>
       <input type="text" id="sharedIndexUrl" placeholder="https://your-index.example/" autocomplete="off" spellcheck="false" />
-      <p class="hint">Off by default. The operator sees the requested mint and your network address, never your RPC URL or settings. Results are trusted operator snapshots, at most two minutes old. Missing, incompatible or invalid results fall back to a local scan. Use ↻ for a fresh local scan and full receipts.</p>
+      <p class="hint">Off by default. The operator sees the requested mint and your network address, never your RPC URL or settings. Snapshots and historical comparisons are operator claims, not independently verified; responses must be at most two minutes old. Missing, incompatible or invalid snapshots fall back to a local scan; unavailable history is omitted. Use ↻ to bypass the index for a local scan and full receipts.</p>
     </section>
 
     <section>

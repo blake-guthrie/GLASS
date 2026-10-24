@@ -107,6 +107,8 @@ Launch tools now fund their wallets through exchanges, fee-payers and closed WSO
 
 **Optional community pre-scans:** [Run the zero-dependency worker and shared index](worker/README.md), or opt into an operator's index in the popup. It is off by default. A matching fresh snapshot shows its source and age; missing or invalid results use the normal local scan. The operator sees the queried public mint and connection IP, never your RPC settings or local memory. Use **↻** for a local scan with full receipts.
 
+**Similar launches:** the same optional index can [retain and compare behavioral launch history](worker/SIMILAR.md), including rotated wallets. The panel explains transaction configuration, funding style, sniper mix and launch-slot shape separately, with observed outcome denominators. Resemblance suggests a possible shared operator; it does not establish identity or predict returns. No historical corpus is bundled.
+
 ---
 
 ## $GLASS

@@ -43,12 +43,15 @@ When capacity is reached the feed pauses with `backpressure`; it does not discar
 
 - `GET /v1/status`: aggregate backlog, failed signatures/scans, unsupported quotes, published records, queued-mint lag, catch-up state, last successful poll and checkpoint-gap count. `lastError` is a reason code, never a provider error/URL.
 - `GET /v1/reports/<mint>`: a public snapshot (200), pending/failed/unsupported job state (202), absent record (404), or invalid/unavailable stored record (503). Other methods return 405. There is no upload route.
+- `GET /v1/similar/<mint>`: the retained target's behavioral matches and observed outcome summary (200), no compatible target history (404), or unavailable history (503). See [history, method and offline import contract](SIMILAR.md). `/v1/status` also reports retained history records and current jobs whose report lacked usable history.
 
 In the extension popup, enter the operator's HTTPS index base URL (or `http://127.0.0.1:8788/` / localhost for local use), check **Use a community pre-scan index**, then **Save** and grant the host permission. It is off by default. The popup requests RPC/index permissions together directly from the click gesture. A base path is supported when a reverse proxy strips that prefix.
 
 The background uses existing fresh local cache first. For mint-address pages, an opted-in request sends only `GET .../v1/reports/<public mint>` with credentials omitted, no referrer, no redirect, and no settings/body. The index operator can see the queried mint and connection IP. Pair/pool pages still resolve through the normal local engine. Response size is capped at 32 KiB with a two-second deadline. Schema, engine, mint, scan profile, scalar types and freshness (two minutes, up to five seconds clock skew) must match. Missing, stale, incompatible, unavailable or invalid results fall back to the normal local scan. **↻ always forces a local scan.**
 
 The panel labels the configured operator and snapshot time, shows risk, launch composition, creator-history and insider-flow summaries, and explains the trust boundary. These are operator-supplied results, not independently verified or live balances. Raw receipts and browser-local reputation are not uploaded or fabricated: use ↻ for a full local report and its normal live tracking. Shared results never enter the browser's local report cache or operator memory. The public projection selects known fields; it excludes RPC URLs, settings, errors, local memory and raw transactions. Unknown typed fields are discarded on receipt.
+
+With the same opt-in, a second mint-only query adds similar-launch context after a shared snapshot, normal local scan, or fresh local cache hit. It never delays displaying the base result. An absent, stale or invalid history response leaves the base report intact. Forced refresh bypasses both routes. Context is attached to the displayed report only, after local caching; it is not promoted to local scan evidence or operator memory.
 
 ## Protocol sources and limits
 

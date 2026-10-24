@@ -25,7 +25,7 @@ export async function main(args = process.argv.slice(2)) {
   try {
     // No automatic RPC failover to somebody else's endpoint.
     const rpc = new RpcClient(rpcUrl, { fallbacks: [], archives: [] });
-    const worker = new PrescanWorker({ rpc, store, config: config.worker, settings: config.scan });
+    const worker = new PrescanWorker({ rpc, store, config: config.worker, settings: config.scan, history: config.history });
     await worker.initialize();
     if (args.includes('--retry-failed')) await worker.retryFailed();
     server = indexServer(store, () => worker.status(), worker.settings);

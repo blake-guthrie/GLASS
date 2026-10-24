@@ -8,6 +8,7 @@ import { computeScore } from './lib/scan/score.js';
 import { ChromeStore, TtlCache, OperatorMemory } from './lib/cache.js';
 import { DEFAULTS } from './lib/constants.js';
 import { lookupSharedSnapshot, snapshotReport } from './lib/shared-index.js';
+import { lookupSimilarLaunches } from './lib/similar-index.js';
 
 const store = new ChromeStore('local');
 const CACHE_PREFIX = 'report:v3:'; // bump when the report shape changes so old cached reports can't break the panel
@@ -71,6 +72,11 @@ async function startScan(key, identifier, hintIsMint, port, force) {
     return;
   }
   const settings = await getSettings();
+  const withSimilar = async (report, signal) => {
+    if (!settings.sharedIndexEnabled || force || !report?.mint || signal?.aborted) return report;
+    const similarLaunches = await lookupSimilarLaunches(report.mint, settings, { signal });
+    return similarLaunches && !signal?.aborted ? { ...report, similarLaunches } : report;
+  };
   let servedCached = false;
   if (!force) {
     const cached = await reportCache.get(key);
@@ -78,7 +84,11 @@ async function startScan(key, identifier, hintIsMint, port, force) {
       port.postMessage({ type: 'done', report: cached, cached: true });
       // Still refresh in the background if older than 60s — silently, so the panel doesn't flicker back
       // to a half-empty report; the fresh one replaces it when complete.
-      if (Date.now() - (cached.finishedAt || 0) < 60_000) return;
+      if (Date.now() - (cached.finishedAt || 0) < 60_000) {
+        const enriched = await withSimilar(cached);
+        if (enriched !== cached) { try { port.postMessage({ type: 'done', report: enriched, cached: true }); } catch {} }
+        return;
+      }
       servedCached = true;
     }
   }
@@ -93,6 +103,8 @@ async function startScan(key, identifier, hintIsMint, port, force) {
       if (hit) {
         job.report = snapshotReport(hit);
         broadcast(job, { type: 'done', report: job.report, shared: true });
+        const enriched = await withSimilar(job.report, job.abort);
+        if (!job.abort.aborted && enriched !== job.report) { job.report = enriched; broadcast(job, { type: 'done', report: enriched, shared: true }); }
         return; // Shared snapshots never enter the local report cache or operator memory.
       }
     }
@@ -120,6 +132,8 @@ async function startScan(key, identifier, hintIsMint, port, force) {
       } catch (e) {
         console.debug('[GLASS] cache write failed', e);
       }
+      const enriched = await withSimilar(report, job.abort);
+      if (!job.abort.aborted && enriched !== report) { job.report = enriched; broadcast(job, { type: 'done', report: enriched }); }
     }
   } catch (e) {
     broadcast(job, { type: 'error', message: e?.message || String(e) });
