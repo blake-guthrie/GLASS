@@ -1,5 +1,5 @@
 // Orchestrates the stages and streams partial reports so the panel fills in progressively.
-import { DEFAULTS, PUMP_TOTAL_SUPPLY } from '../constants.js';
+import { DEFAULTS, PUMP_TOTAL_SUPPLY, PROGRAMS } from '../constants.js';
 import { resolveMint } from './resolve.js';
 import { findCreation, collectLaunchTxs, extractLaunchEvents } from './launch.js';
 import { analyseLaunch, enrichWithJito, applyWalletKinds, toolPatternReasons } from './fingerprint.js';
@@ -9,7 +9,7 @@ import { trackCluster } from './live.js';
 import { discoverPriorLaunches, analysePriorLaunches, rateOperator, devExitOnLaunch, clusterExitOnLaunch, profileSummary } from './operator.js';
 import { creatorProfile, toPriorLaunches, fetchCoin } from './devprofile.js';
 import { computeScore } from './score.js';
-import { dexTokenInfo, jitoBundleId, solPriceUsd } from '../market.js';
+import { dexTokenInfo, jitoBundleId, quoteToUsdMultiplier, solPriceUsd } from '../market.js';
 import { pMap } from '../http.js';
 import known from '../../data/known.js';
 
@@ -99,14 +99,27 @@ export async function runScan(rpc, identifier, opts = {}) {
     }
     report.market = pair ? { ...pair } : { mint: r.mint };
     let supply = PUMP_TOTAL_SUPPLY;
+    let confirmedSupply = null;
     try {
       const m = await rpc.getMintInfo(r.mint);
       if (m?.supply) supply = m.supply;
+      if (typeof m?.supply === 'number' && Number.isFinite(m.supply) && m.supply > 0) confirmedSupply = m.supply;
       if (m?.tokenProgram) report.tokenProgram = m.tokenProgram;
     } catch {
       /* default */
     }
     report.supply = supply;
+    if (
+      report.market.marketCapUsd == null &&
+      typeof report.market.priceUsd === 'number' &&
+      Number.isFinite(report.market.priceUsd) &&
+      report.market.priceUsd > 0 &&
+      confirmedSupply !== null &&
+      Number.isFinite(report.market.priceUsd * confirmedSupply)
+    ) {
+      report.market.marketCapUsd = report.market.priceUsd * confirmedSupply;
+      report.market.mcapSource = 'DexScreener USD price × token supply';
+    }
     solPriceUsd().then((v) => (report.solUsd = v || null)).catch(() => {});
     done('resolve');
   } catch (e) {
@@ -256,11 +269,15 @@ export async function runScan(rpc, identifier, opts = {}) {
       const last = [...events].reverse().find((e) => e.priceQuote);
       const createEv = creation.record.pumpEvents?.find((e) => e.type === 'create');
       const priceQuote = last?.priceQuote ?? (createEv?.vSol && createEv?.vTok ? createEv.vSol / createEv.vTok : null);
-      const sol = priceQuote ? await solPriceUsd() : null;
-      if (priceQuote && sol) {
-        report.market.marketCapUsd = priceQuote * report.supply * sol;
-        report.market.priceUsd = priceQuote * sol;
+      const qMint = last?.quoteMint || report.market?.quoteMint || null;
+      const qSym = last?.quoteSymbol || report.market?.quoteSymbol || null;
+      const sol = priceQuote && qMint !== PROGRAMS.USDC && qMint !== PROGRAMS.USDT ? await solPriceUsd() : null;
+      const quoteUsd = quoteToUsdMultiplier(qMint, sol, qSym);
+      if (priceQuote && quoteUsd && Number.isFinite(priceQuote * report.supply * quoteUsd)) {
+        report.market.marketCapUsd = priceQuote * report.supply * quoteUsd;
+        report.market.priceUsd = priceQuote * quoteUsd;
         report.market.mcapSource = last ? 'last launch-window trade' : 'initial bonding-curve price (no trades yet)';
+        report.market.quoteSymbol = qSym || 'SOL';
         if (!report.market.dexId) report.market.dexId = 'pumpfun';
       }
     }

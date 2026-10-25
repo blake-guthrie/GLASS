@@ -722,7 +722,8 @@ tr.how td { border-bottom: 1px solid #171b25; }
     if (!r || !ev) return;
     const ls = (panel.liveState = panel.liveState || { balances: new Map(), events: [], flash: new Map() });
     if (ev.type === 'curve') {
-      const sol = r.solUsd || (r.market?.priceUsd && r.market?.priceNative ? r.market.priceUsd / r.market.priceNative : null);
+      const isUsdQuote = r.market?.quoteMint === 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' || /^USD[CT]?$/i.test(r.market?.quoteSymbol || '');
+      const sol = isUsdQuote ? 1 : (r.solUsd || (r.market?.priceUsd && r.market?.priceNative ? r.market.priceUsd / r.market.priceNative : null));
       ls.curve = { ...ev, mcapUsd: ev.priceSol && sol ? ev.priceSol * (r.supply || 1e9) * sol : null };
       if (ls.curve.mcapUsd && r.market) r.market.marketCapUsd = ls.curve.mcapUsd;
       // throttle re-render for price ticks
