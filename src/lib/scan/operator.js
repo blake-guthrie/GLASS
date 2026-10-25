@@ -5,6 +5,7 @@ import { pMap } from '../http.js';
 import { dexTokensBulk, priceHistory, solPriceUsd } from '../market.js';
 import { derivePumpAccounts } from './launch.js';
 import { PUMP_TOTAL_SUPPLY, PROGRAMS } from '../constants.js';
+import { quotePriceUsd } from '../quote.js';
 
 const GRADUATION_MCAP = 69_000;
 
@@ -75,7 +76,7 @@ export async function discoverPriorLaunches(rpc, mint, cluster, sigLists, { memo
           if (e.type === 'trade' && (e.user === w || rec.feePayer === w)) {
             seenTrade.add(e.mint);
             // A wallet paying fees for someone else's buy is the operator's funder/payer → same cluster
-            add(e.mint, w, e.isBuy ? (e.user === w ? 'buyer' : 'payer') : 'seller', { slot: rec.slot, t, sig: rec.sig, tokens: e.tokenAmount, sol: e.quoteAmount, priceQuote: e.priceQuote, forUser: e.user });
+            add(e.mint, w, e.isBuy ? (e.user === w ? 'buyer' : 'payer') : 'seller', { slot: rec.slot, t, sig: rec.sig, tokens: e.tokenAmount, sol: e.solAmount ?? e.quoteAmount, quoteMint: e.quoteMint, priceQuote: e.priceQuote, forUser: e.user });
           }
         }
         for (const p of rec.pumpIxs) {
@@ -117,7 +118,7 @@ export async function discoverPriorLaunches(rpc, mint, cluster, sigLists, { memo
           if (!rec || rec.err) return;
           const t = rec.blockTime ? rec.blockTime * 1000 : null;
           for (const e of rec.pumpEvents || []) {
-            if (e.type === 'trade' && e.user === fw && e.isBuy) add(e.mint, fw, 'funded', { slot: rec.slot, t, sig: rec.sig, tokens: e.tokenAmount, sol: e.quoteAmount, priceQuote: e.priceQuote, via: funder });
+            if (e.type === 'trade' && e.user === fw && e.isBuy) add(e.mint, fw, 'funded', { slot: rec.slot, t, sig: rec.sig, tokens: e.tokenAmount, sol: e.solAmount ?? e.quoteAmount, quoteMint: e.quoteMint, priceQuote: e.priceQuote, via: funder });
             if (e.type === 'create') add(e.mint, fw, 'creator', { slot: rec.slot, t, sig: rec.sig, via: funder });
           }
         });
@@ -272,7 +273,6 @@ export async function analysePriorLaunches(rpc, launches, cluster, sigLists, { s
  * curve's recent trades). Lower bound on the real peak, but good enough to rank a serial launcher.
  */
 async function onchainOutcome(rpc, launch, exit, supply, solUsd) {
-  if (!solUsd) return null;
   try {
     const { bondingCurve } = await derivePumpAccounts(launch.mint);
     const sigs = (await rpc.getSignaturesForAddress(bondingCurve, { limit: 60 })) || [];
@@ -281,8 +281,8 @@ async function onchainOutcome(rpc, launch, exit, supply, solUsd) {
     const pick = [...ok.slice(0, 12), ...ok.slice(-12)];
     const uniq = [...new Map(pick.map((s) => [s.signature, s])).values()];
     const raws = await rpc.getTransactions(uniq.map((s) => s.signature));
-    let peakQuote = 0;
-    let lastQuote = null;
+    let peakUsd = 0;
+    let lastUsd = null;
     let lastT = 0;
     let trades = 0;
     raws.forEach((raw, i) => {
@@ -291,16 +291,21 @@ async function onchainOutcome(rpc, launch, exit, supply, solUsd) {
       for (const e of rec.pumpEvents || []) {
         if (e.type !== 'trade' || e.mint !== launch.mint || !e.priceQuote) continue;
         trades++;
-        if (e.priceQuote > peakQuote) peakQuote = e.priceQuote;
+        const priceUsd = quotePriceUsd(e.priceQuote, e.quoteMint, solUsd);
+        if (!priceUsd) continue;
+        if (priceUsd > peakUsd) peakUsd = priceUsd;
         if ((rec.blockTime || 0) >= lastT) {
           lastT = rec.blockTime || 0;
-          lastQuote = e.priceQuote;
+          lastUsd = priceUsd;
         }
       }
     });
-    for (const s of exit?.sellsDetail || []) if (s.priceQuote > peakQuote) peakQuote = s.priceQuote;
-    if (!peakQuote) return null;
-    return { peakMcapUsd: peakQuote * supply * solUsd, nowMcapUsd: lastQuote ? lastQuote * supply * solUsd : null, trades };
+    for (const s of exit?.sellsDetail || []) {
+      const priceUsd = quotePriceUsd(s.priceQuote, s.quoteMint, solUsd);
+      if (priceUsd > peakUsd) peakUsd = priceUsd;
+    }
+    if (!peakUsd) return null;
+    return { peakMcapUsd: peakUsd * supply, nowMcapUsd: lastUsd ? lastUsd * supply : null, trades };
   } catch {
     return null;
   }
@@ -336,7 +341,7 @@ export async function devExitOnLaunch(rpc, creator, launch, supply, solUsd, { to
       for (const e of rec.pumpEvents || []) {
         if (e.type !== 'trade' || e.mint !== launch.mint || e.user !== creator) continue;
         if (e.isBuy) bought += e.tokenAmount;
-        else sells.push({ t: rec.blockTime * 1000, tokens: e.tokenAmount, sol: e.quoteAmount, priceQuote: e.priceQuote, minutes: createdSec ? (rec.blockTime - createdSec) / 60 : null });
+        else sells.push({ t: rec.blockTime * 1000, tokens: e.tokenAmount, sol: e.solAmount ?? e.quoteAmount, quoteMint: e.quoteMint, priceQuote: e.priceQuote, minutes: createdSec ? (rec.blockTime - createdSec) / 60 : null });
       }
       if (!(rec.pumpEvents || []).length) {
         const td = rec.tokenDeltas?.find((d) => d.mint === launch.mint && d.owner === creator && d.delta < 0);
@@ -347,12 +352,13 @@ export async function devExitOnLaunch(rpc, creator, launch, supply, solUsd, { to
     sells.sort((a, b) => a.t - b.t);
     const first = sells[0];
     const soldTokens = sells.reduce((a, x) => a + x.tokens, 0);
-    const mcapAt = first.priceQuote && solUsd ? first.priceQuote * supply * solUsd : null;
+    const priceUsd = quotePriceUsd(first.priceQuote, first.quoteMint, solUsd);
+    const mcapAt = priceUsd ? priceUsd * supply : null;
     const peakRef = launch.peakMcapUsd || null;
     return {
       sampledTxs: ordered.length,
       sells: sells.length,
-      sellsDetail: sells.slice(0, 20).map((x) => ({ t: x.t, priceQuote: x.priceQuote || null, minutes: x.minutes })),
+      sellsDetail: sells.slice(0, 20).map((x) => ({ t: x.t, priceQuote: x.priceQuote || null, quoteMint: x.quoteMint, minutes: x.minutes })),
       firstSellMin: first.minutes != null ? Math.round(first.minutes) : null,
       firstSellSec: first.minutes != null ? Math.round(first.minutes * 60) : null,
       soldPct: pct(soldTokens, supply),
@@ -396,7 +402,7 @@ export async function clusterExitOnLaunch(rpc, launch, cluster, sigLists, hist, 
       sampled++;
       const ev = (rec.pumpEvents || []).find((e) => e.type === 'trade' && e.mint === launch.mint && e.user === w && !e.isBuy);
       if (ev) {
-        sells.push({ wallet: w, t: rec.blockTime * 1000, tokens: ev.tokenAmount, sol: ev.quoteAmount, priceQuote: ev.priceQuote, minutes: (rec.blockTime - createdSec) / 60 });
+        sells.push({ wallet: w, t: rec.blockTime * 1000, tokens: ev.tokenAmount, sol: ev.solAmount ?? ev.quoteAmount, quoteMint: ev.quoteMint, priceQuote: ev.priceQuote, minutes: (rec.blockTime - createdSec) / 60 });
         return;
       }
       const td = rec.tokenDeltas.find((d) => d.mint === launch.mint && d.owner === w && d.delta < 0);
@@ -409,7 +415,8 @@ export async function clusterExitOnLaunch(rpc, launch, cluster, sigLists, hist, 
   const soldTokens = sells.reduce((s, x) => s + x.tokens, 0);
   // mcap at first sell: exact from the trade's post-trade price when we have it, else from candles
   let mcapAt = null;
-  if (first.priceQuote && solUsd) mcapAt = first.priceQuote * supply * solUsd;
+  const priceUsd = quotePriceUsd(first.priceQuote, first.quoteMint, solUsd);
+  if (priceUsd) mcapAt = priceUsd * supply;
   else if (hist?.available) mcapAt = mcapAtTime(hist, first.t);
   // Peak reference: candles when we have them, else the launch's known ATH (pump.fun record)
   const peakRef = hist?.available ? hist.peakMcapUsd : launch.peakMcapUsd || null;
@@ -419,7 +426,7 @@ export async function clusterExitOnLaunch(rpc, launch, cluster, sigLists, hist, 
   return {
     sampledTxs: sampled,
     sells: sells.length,
-    sellsDetail: sells.slice(0, 20).map((x) => ({ t: x.t, priceQuote: x.priceQuote || null, minutes: x.minutes })),
+    sellsDetail: sells.slice(0, 20).map((x) => ({ t: x.t, priceQuote: x.priceQuote || null, quoteMint: x.quoteMint, minutes: x.minutes })),
     firstSellMin: Math.round(first.minutes),
     soldPct: pct(soldTokens, supply),
     soldWithin10MinPct: pct(within10, supply),

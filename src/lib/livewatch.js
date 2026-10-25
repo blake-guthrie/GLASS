@@ -2,8 +2,9 @@
 // account for the mint (balance changes = buys / sells / transfers, sub-second) and on the pump.fun
 // bonding curve (live price / market cap from its virtual reserves). No polling, no page scraping.
 import { PROGRAMS } from './constants.js';
-import { decodeBase58 } from './base58.js';
+import { decodeBase58, encodeBase58 } from './base58.js';
 import { findProgramAddress } from './pda.js';
+import { normaliseQuoteMint, quoteScale, quotePriceUsd } from './quote.js';
 
 const LAMPORTS = 1e9;
 
@@ -41,7 +42,14 @@ export function decodeCurve(b64) {
     const rSol = readU64(bytes, 32) / LAMPORTS;
     const supply = readU64(bytes, 40) / 1e6;
     const complete = bytes[48] === 1;
-    return { vTok, vSol, rTok, rSol, supply, complete, priceSol: vTok > 0 ? vSol / vTok : null };
+    // creator (32), mayhem (1), cashback (1), then quote_mint (32).
+    const quoteMint = normaliseQuoteMint(bytes.length >= 115 ? encodeBase58(bytes.subarray(83, 115)) : null);
+    const scale = quoteScale(quoteMint);
+    const vQuote = scale ? readU64(bytes, 16) / scale : null;
+    const rQuote = scale ? readU64(bytes, 32) / scale : null;
+    const priceQuote = scale && vTok > 0 ? vQuote / vTok : null;
+    return { vTok, vSol, rTok, rSol, vQuote, rQuote, quoteMint, supply, complete, priceQuote,
+      priceSol: quoteMint === PROGRAMS.WSOL ? priceQuote : null };
   } catch {
     return null;
   }
@@ -49,7 +57,7 @@ export function decodeCurve(b64) {
 
 export class LiveWatcher {
   /**
-   * @param opts { wsUrl, mint, tokenProgram, wallets:[{wallet, kind}], curve, onEvent(ev), onStatus(s), log }
+   * @param opts { wsUrl, mint, tokenProgram, wallets:[{wallet, kind}], curve, supply, solUsd, onEvent(ev), onStatus(s), log }
    */
   constructor(opts) {
     this.o = opts;
@@ -135,7 +143,10 @@ export class LiveWatcher {
     if (meta.kind === 'curve') {
       const data = Array.isArray(value?.data) ? value.data[0] : null;
       const c = data ? decodeCurve(data) : null;
-      if (c) this.o.onEvent?.({ type: 'curve', at, slot, ...c });
+      if (c) {
+        const priceUsd = quotePriceUsd(c.priceQuote, c.quoteMint, this.o.solUsd);
+        this.o.onEvent?.({ type: 'curve', at, slot, ...c, mcapUsd: priceUsd ? priceUsd * (this.o.supply || c.supply) : null });
+      }
       return;
     }
     // token account: value null = account closed (sold everything and closed the ATA)

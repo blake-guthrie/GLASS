@@ -12,6 +12,7 @@ import { computeScore } from './score.js';
 import { dexTokenInfo, jitoBundleId, solPriceUsd } from '../market.js';
 import { pMap } from '../http.js';
 import known from '../../data/known.js';
+import { quotePriceUsd } from '../quote.js';
 
 export const STAGES = ['resolve', 'creation', 'launch', 'wallets', 'live', 'operator', 'score'];
 
@@ -255,12 +256,15 @@ export async function runScan(rpc, identifier, opts = {}) {
     if (report.market && report.market.marketCapUsd == null) {
       const last = [...events].reverse().find((e) => e.priceQuote);
       const createEv = creation.record.pumpEvents?.find((e) => e.type === 'create');
-      const priceQuote = last?.priceQuote ?? (createEv?.vSol && createEv?.vTok ? createEv.vSol / createEv.vTok : null);
-      const sol = priceQuote ? await solPriceUsd() : null;
-      if (priceQuote && sol) {
-        report.market.marketCapUsd = priceQuote * report.supply * sol;
-        report.market.priceUsd = priceQuote * sol;
-        report.market.mcapSource = last ? 'last launch-window trade' : 'initial bonding-curve price (no trades yet)';
+      const source = last || createEv;
+      const sol = source?.priceQuote ? await solPriceUsd() : null;
+      if (sol) report.solUsd = sol;
+      const indexedPrice = report.market.priceUsd;
+      const priceUsd = indexedPrice > 0 && Number.isFinite(indexedPrice) ? indexedPrice : quotePriceUsd(source?.priceQuote, source?.quoteMint, sol);
+      if (priceUsd) {
+        report.market.marketCapUsd = priceUsd * report.supply;
+        report.market.priceUsd = priceUsd;
+        report.market.mcapSource = indexedPrice > 0 ? 'DexScreener USD price × supply' : last ? 'last launch-window trade' : 'initial bonding-curve price (no trades yet)';
         if (!report.market.dexId) report.market.dexId = 'pumpfun';
       }
     }
