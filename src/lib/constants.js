@@ -81,6 +81,15 @@ export const PUMP_EVENTS = {
 
 export const LAMPORTS_PER_SOL = 1_000_000_000;
 export const PUMP_TOTAL_SUPPLY = 1_000_000_000; // tokens (6 decimals)
+
+// Quote assets. Trades and curve reserves are denominated in the pair's quote mint: USD stables
+// are already dollars (6 decimals), SOL needs the SOL/USD rate (9 decimals). Everything that
+// converts a quote-denominated price to USD goes through quoteToUsd().
+export const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+export const USDT_MINT = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
+export const USD_STABLE_MINTS = new Set([USDC_MINT, USDT_MINT]);
+export const quoteDecimals = (quoteMint) => (quoteMint && USD_STABLE_MINTS.has(quoteMint) ? 6 : 9);
+export const quoteToUsd = (quoteMint, solUsd) => (quoteMint && USD_STABLE_MINTS.has(quoteMint) ? 1 : solUsd);
 export const PUMP_CURVE_SOL_TARGET = 85; // approx SOL to fill the bonding curve
 export const AVG_SLOT_MS = 400;
 

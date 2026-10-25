@@ -5,6 +5,8 @@
   globalThis.__glassLoaded = true;
 
   const Sites = globalThis.GlassSites;
+  // Quote assets: trades in USD stables are already dollars; SOL needs the SOL/USD rate.
+  const USD_STABLE = new Set(['EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB']);
   const STAGE_LABELS = {
     resolve: 'Resolving token',
     creation: 'Finding creation tx',
@@ -723,7 +725,9 @@ tr.how td { border-bottom: 1px solid #171b25; }
     const ls = (panel.liveState = panel.liveState || { balances: new Map(), events: [], flash: new Map() });
     if (ev.type === 'curve') {
       const sol = r.solUsd || (r.market?.priceUsd && r.market?.priceNative ? r.market.priceUsd / r.market.priceNative : null);
-      ls.curve = { ...ev, mcapUsd: ev.priceSol && sol ? ev.priceSol * (r.supply || 1e9) * sol : null };
+      // USD-stable quote: price is already dollars — don't multiply by the SOL rate.
+      const rate = ev.quoteMint && USD_STABLE.has(ev.quoteMint) ? 1 : sol;
+      ls.curve = { ...ev, mcapUsd: ev.priceSol && rate ? ev.priceSol * (r.supply || 1e9) * rate : null };
       if (ls.curve.mcapUsd && r.market) r.market.marketCapUsd = ls.curve.mcapUsd;
       // throttle re-render for price ticks
       clearTimeout(ls.curveTimer);
