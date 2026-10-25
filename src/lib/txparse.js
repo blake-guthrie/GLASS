@@ -1,6 +1,6 @@
 // Normalise a `jsonParsed` Solana transaction into the flat record the scanners work with.
 import { decodeBase58, encodeBase58, readU32LE, readU64LE } from './base58.js';
-import { PROGRAMS, PUMP_IX, PUMP_BUY_IX, PUMP_SELL_IX, PUMP_CREATE_IX, ANCHOR_EVENT_CPI, PUMP_EVENTS, JITO_TIP_ACCOUNTS, LAMPORTS_PER_SOL } from './constants.js';
+import { PROGRAMS, PUMP_IX, PUMP_BUY_IX, PUMP_SELL_IX, PUMP_CREATE_IX, ANCHOR_EVENT_CPI, PUMP_EVENTS, JITO_TIP_ACCOUNTS, LAMPORTS_PER_SOL, USD_STABLE_MINTS } from './constants.js';
 
 const DISC = Object.entries(PUMP_IX).map(([name, bytes]) => [name, bytes.join(',')]);
 const EVENT_CPI_KEY = ANCHOR_EVENT_CPI.join(',');
@@ -42,22 +42,32 @@ export function decodePumpEvent(ix) {
   try {
     if (name === 'TradeEvent') {
       const mint = pk();
-      const quoteAmount = Number(u64()) / LAMPORTS_PER_SOL;
+      const rawQuote = Number(u64());
       const tokenAmount = Number(u64()) / 1e6;
       const isBuy = d[o++] === 1;
       const user = pk();
       const timestamp = Number(u64());
-      const vSol = Number(u64()) / LAMPORTS_PER_SOL;
+      const rawVSol = Number(u64());
       const vTok = Number(u64()) / 1e6;
-      const rSol = Number(u64()) / LAMPORTS_PER_SOL;
+      const rawRSol = Number(u64());
       const rTok = Number(u64()) / 1e6;
       const feeRecipient = pk();
       o += 8; // fee_basis_points
-      const fee = Number(u64()) / LAMPORTS_PER_SOL;
+      const rawFee = Number(u64());
       const creator = pk();
       o += 8; // creator_fee_basis_points
-      const creatorFee = Number(u64()) / LAMPORTS_PER_SOL;
-      return { type: 'trade', mint, quoteAmount, tokenAmount, isBuy, user, timestamp, vSol, vTok, rSol, rTok, feeRecipient, fee, creator, creatorFee, priceQuote: vTok > 0 ? vSol / vTok : null };
+      const rawCreatorFee = Number(u64());
+      const quoteAmount = rawQuote / LAMPORTS_PER_SOL;
+      const vSol = rawVSol / LAMPORTS_PER_SOL;
+      const rSol = rawRSol / LAMPORTS_PER_SOL;
+      const fee = rawFee / LAMPORTS_PER_SOL;
+      const creatorFee = rawCreatorFee / LAMPORTS_PER_SOL;
+      return {
+        type: 'trade', mint, quoteAmount, tokenAmount, isBuy, user, timestamp,
+        vSol, vTok, rSol, rTok, feeRecipient, fee, creator, creatorFee,
+        rawQuote, rawVSol, rawRSol,
+        priceQuote: vTok > 0 ? vSol / vTok : null
+      };
     }
     if (name === 'CreateEvent') {
       const tokenName = str();
@@ -121,24 +131,30 @@ export function decodePumpIx(ix, signers = []) {
       // All variants: [amount u64][limit u64]. "exact_*_in" variants put the quote amount first.
       const a = Number(readU64LE(data, 8));
       const b = Number(readU64LE(data, 16));
-      if (name.includes('exact_sol_in') || name.includes('exact_quote_in')) {
-        out.solIn = a / LAMPORTS_PER_SOL;
-        out.minTokensOut = b / 1e6;
-      } else {
-        out.tokenAmount = a / 1e6;
-        out.solLimit = b / LAMPORTS_PER_SOL; // max_sol_cost (buy) / min_sol_output (sell)
-      }
+      let isUsdQuote = false;
       if (modern) {
         out.mint = accounts[1];
         out.quoteMint = accounts[2];
         out.user = firstSigner || accounts[8] || null;
         out.feeRecipient = null; // read from TradeEvent instead
         out.bondingCurve = accounts[5] && accounts[5] !== out.user ? accounts[5] : null;
+        if (out.quoteMint && USD_STABLE_MINTS.has(out.quoteMint)) isUsdQuote = true;
       } else {
         out.mint = accounts[2];
         out.user = accounts[6] || firstSigner;
         out.feeRecipient = accounts[1];
         out.bondingCurve = accounts[3];
+      }
+      out.isUsdQuote = isUsdQuote;
+      const qDec = isUsdQuote ? 1e6 : LAMPORTS_PER_SOL;
+      if (name.includes('exact_sol_in') || name.includes('exact_quote_in')) {
+        out.solIn = a / qDec;
+        out.quoteIn = a / qDec;
+        out.minTokensOut = b / 1e6;
+      } else {
+        out.tokenAmount = a / 1e6;
+        out.solLimit = b / qDec;
+        out.quoteLimit = b / qDec;
       }
     } else if (out.kind === 'create') {
       let off = 8;
@@ -309,6 +325,19 @@ export function parseTx(tx, signatureHint) {
   }
 
   const entryProgram = programs.find((p) => ![PROGRAMS.SYSTEM, PROGRAMS.ATA, PROGRAMS.TOKEN, PROGRAMS.TOKEN_2022].includes(p)) || programs[0] || null;
+
+  const hasUsdQuote = pumpIxs.some((p) => p.isUsdQuote);
+  if (hasUsdQuote) {
+    for (const ev of pumpEvents) {
+      if (ev.type === 'trade' && ev.rawQuote != null) {
+        ev.isUsdQuote = true;
+        ev.quoteAmount = ev.rawQuote / 1e6;
+        ev.vSol = ev.rawVSol / 1e6;
+        ev.rSol = ev.rawRSol / 1e6;
+        ev.priceQuote = ev.vTok > 0 ? ev.vSol / ev.vTok : null;
+      }
+    }
+  }
 
   return {
     sig,

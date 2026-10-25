@@ -1,6 +1,6 @@
 // Market data: DexScreener (pairs, price, mcap), GeckoTerminal (OHLCV → peaks), Jito bundles, pump.fun API (optional).
 import { fetchJson } from './http.js';
-import { SOURCES, PROGRAMS, PUMP_TOTAL_SUPPLY } from './constants.js';
+import { SOURCES, PROGRAMS, PUMP_TOTAL_SUPPLY, USD_STABLE_MINTS } from './constants.js';
 
 const memo = new Map();
 async function cached(key, ttlMs, fn) {
@@ -21,6 +21,8 @@ function pickBestPair(pairs, mint) {
 
 export function normalisePair(p) {
   if (!p) return null;
+  const quoteSym = p.quoteToken?.symbol?.toUpperCase() || '';
+  const isUsdQuote = quoteSym.includes('USD') || (p.quoteToken?.address && USD_STABLE_MINTS.has(p.quoteToken.address));
   return {
     pairAddress: p.pairAddress,
     dexId: p.dexId,
@@ -28,10 +30,13 @@ export function normalisePair(p) {
     mint: p.baseToken?.address,
     name: p.baseToken?.name,
     symbol: p.baseToken?.symbol,
-    priceUsd: p.priceUsd ? Number(p.priceUsd) : null,
+    quoteMint: p.quoteToken?.address,
+    quoteSymbol: p.quoteToken?.symbol,
+    isUsdQuote,
+    priceUsd: p.priceUsd ? Number(p.priceUsd) : isUsdQuote && p.priceNative ? Number(p.priceNative) : null,
     priceNative: p.priceNative ? Number(p.priceNative) : null,
-    marketCapUsd: p.marketCap ?? p.fdv ?? null,
-    fdvUsd: p.fdv ?? null,
+    marketCapUsd: p.marketCap != null ? Number(p.marketCap) : p.fdv != null ? Number(p.fdv) : null,
+    fdvUsd: p.fdv != null ? Number(p.fdv) : null,
     liquidityUsd: p.liquidity?.usd ?? null,
     volume24h: p.volume?.h24 ?? null,
     pairCreatedAt: p.pairCreatedAt ?? null,
