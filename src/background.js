@@ -138,6 +138,8 @@ async function startWatch(port, msg) {
     tokenProgram: msg.tokenProgram,
     wallets: msg.wallets,
     curve: msg.curve || null,
+    supply: msg.supply,
+    solUsd: msg.solUsd,
     log: (m) => console.debug('[GLASS live]', m),
     onEvent: (ev) => {
       try {

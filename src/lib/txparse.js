@@ -1,6 +1,7 @@
 // Normalise a `jsonParsed` Solana transaction into the flat record the scanners work with.
 import { decodeBase58, encodeBase58, readU32LE, readU64LE } from './base58.js';
 import { PROGRAMS, PUMP_IX, PUMP_BUY_IX, PUMP_SELL_IX, PUMP_CREATE_IX, ANCHOR_EVENT_CPI, PUMP_EVENTS, JITO_TIP_ACCOUNTS, LAMPORTS_PER_SOL } from './constants.js';
+import { normaliseQuoteMint, quoteScale } from './quote.js';
 
 const DISC = Object.entries(PUMP_IX).map(([name, bytes]) => [name, bytes.join(',')]);
 const EVENT_CPI_KEY = ANCHOR_EVENT_CPI.join(',');
@@ -24,17 +25,22 @@ export function decodePumpEvent(ix) {
   const name = EVENT_KEYS[Array.from(d.subarray(8, 16)).join(',')];
   if (!name) return null;
   let o = 16;
+  const need = (n) => { if (o + n > d.length) throw new Error('truncated event'); };
   const pk = () => {
+    need(32);
     const s = encodeBase58(d.subarray(o, o + 32));
     o += 32;
     return s;
   };
   const u64 = () => {
+    need(8);
     const v = readU64LE(d, o);
     o += 8;
     return v;
   };
   const str = () => {
+    need(4);
+    need(4 + readU32LE(d, o));
     const [s, next] = readString(d, o);
     o = next;
     return s;
@@ -57,7 +63,29 @@ export function decodePumpEvent(ix) {
       const creator = pk();
       o += 8; // creator_fee_basis_points
       const creatorFee = Number(u64()) / LAMPORTS_PER_SOL;
-      return { type: 'trade', mint, quoteAmount, tokenAmount, isBuy, user, timestamp, vSol, vTok, rSol, rTok, feeRecipient, fee, creator, creatorFee, priceQuote: vTok > 0 ? vSol / vTok : null };
+      const out = { type: 'trade', mint, quoteAmount, solAmount: quoteAmount, tokenAmount, isBuy, user, timestamp, vSol, vTok, rSol, rTok, feeRecipient, fee, creator, creatorFee,
+        quoteMint: PROGRAMS.WSOL, vQuote: vSol, rQuote: rSol, priceQuote: vTok > 0 ? vSol / vTok : null };
+      // Current IDL appends quote-asset data AFTER volume tracking, ix_name,
+      // cashback/buyback fees and Vec<Shareholder { pubkey, u16 }>.
+      if (o < d.length) {
+        need(33); o += 33;
+        str();
+        need(37); o += 33;
+        const count = readU32LE(d, o); o += 4;
+        need(count * 34); o += count * 34;
+        if (o < d.length) {
+          out.quoteMint = normaliseQuoteMint(pk());
+          const amount = Number(u64());
+          const virtual = Number(u64());
+          const real = Number(u64());
+          const scale = quoteScale(out.quoteMint);
+          out.quoteAmount = scale ? amount / scale : null;
+          out.vQuote = scale ? virtual / scale : null;
+          out.rQuote = scale ? real / scale : null;
+          out.priceQuote = scale && vTok > 0 ? out.vQuote / vTok : null;
+        }
+      }
+      return out;
     }
     if (name === 'CreateEvent') {
       const tokenName = str();
@@ -72,7 +100,19 @@ export function decodePumpEvent(ix) {
       const vSol = Number(u64()) / LAMPORTS_PER_SOL;
       const rTok = Number(u64()) / 1e6;
       const supply = Number(u64()) / 1e6;
-      return { type: 'create', tokenName, symbol, uri, mint, bondingCurve, user, creator, timestamp, vTok, vSol, rTok, supply };
+      const out = { type: 'create', tokenName, symbol, uri, mint, bondingCurve, user, creator, timestamp, vTok, vSol, rTok, supply,
+        quoteMint: PROGRAMS.WSOL, vQuote: vSol, priceQuote: vTok > 0 ? vSol / vTok : null };
+      if (o < d.length) {
+        need(34); o += 34; // token_program, mayhem, cashback
+        if (o < d.length) {
+          out.quoteMint = normaliseQuoteMint(pk());
+          const virtual = Number(u64());
+          const scale = quoteScale(out.quoteMint);
+          out.vQuote = scale ? virtual / scale : null;
+          out.priceQuote = scale && vTok > 0 ? out.vQuote / vTok : null;
+        }
+      }
+      return out;
     }
     if (name === 'CompleteEvent') {
       const user = pk();
@@ -368,7 +408,7 @@ export function txInitialisesMint(tx, mint) {
  */
 export function classifyForMint(rec, mint, wallet) {
   const ev = rec.pumpEvents?.find((e) => e.type === 'trade' && e.mint === mint && e.user === wallet);
-  if (ev) return { side: ev.isBuy ? 'buy' : 'sell', tokens: ev.tokenAmount, sol: ev.quoteAmount, priceQuote: ev.priceQuote, fromEvent: true };
+  if (ev) return { side: ev.isBuy ? 'buy' : 'sell', tokens: ev.tokenAmount, sol: ev.solAmount ?? ev.quoteAmount, quoteAmount: ev.quoteAmount, quoteMint: ev.quoteMint, priceQuote: ev.priceQuote, fromEvent: true };
   const td = rec.tokenDeltas.find((d) => d.owner === wallet && d.mint === mint);
   if (!td) return { side: null, tokens: 0, sol: 0 };
   const solChange = (rec.solDelta[wallet] || 0) / LAMPORTS_PER_SOL;

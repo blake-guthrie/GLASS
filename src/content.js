@@ -712,7 +712,7 @@ tr.how td { border-bottom: 1px solid #171b25; }
     const wallets = [{ wallet: r.creation.creator, kind: 'dev' }, ...win.filter((b) => b.kind !== 'organic').map((b) => ({ wallet: b.wallet, kind: b.kind || 'bundle' }))].filter((w) => w.wallet).slice(0, 40);
     const balances = [...(r.live?.holdings || []), ...(r.live?.otherHoldings || [])].map((h) => ({ wallet: h.wallet, now: h.now }));
     try {
-      port.postMessage({ type: 'watch', mint: r.mint, tokenProgram: r.tokenProgram, wallets, balances, curve: r.creation.bondingCurve || null });
+      port.postMessage({ type: 'watch', mint: r.mint, tokenProgram: r.tokenProgram, wallets, balances, curve: r.creation.bondingCurve || null, supply: r.supply, solUsd: r.solUsd });
     } catch {
       /* port gone */
     }
@@ -722,8 +722,7 @@ tr.how td { border-bottom: 1px solid #171b25; }
     if (!r || !ev) return;
     const ls = (panel.liveState = panel.liveState || { balances: new Map(), events: [], flash: new Map() });
     if (ev.type === 'curve') {
-      const sol = r.solUsd || (r.market?.priceUsd && r.market?.priceNative ? r.market.priceUsd / r.market.priceNative : null);
-      ls.curve = { ...ev, mcapUsd: ev.priceSol && sol ? ev.priceSol * (r.supply || 1e9) * sol : null };
+      ls.curve = { ...ev };
       if (ls.curve.mcapUsd && r.market) r.market.marketCapUsd = ls.curve.mcapUsd;
       // throttle re-render for price ticks
       clearTimeout(ls.curveTimer);
