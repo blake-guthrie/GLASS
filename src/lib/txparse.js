@@ -1,6 +1,7 @@
 // Normalise a `jsonParsed` Solana transaction into the flat record the scanners work with.
 import { decodeBase58, encodeBase58, readU32LE, readU64LE } from './base58.js';
 import { PROGRAMS, PUMP_IX, PUMP_BUY_IX, PUMP_SELL_IX, PUMP_CREATE_IX, ANCHOR_EVENT_CPI, PUMP_EVENTS, JITO_TIP_ACCOUNTS, LAMPORTS_PER_SOL } from './constants.js';
+import { quoteScale, tradeQuoteAmounts, quoteMintFromIxs } from './quote.js';
 
 const DISC = Object.entries(PUMP_IX).map(([name, bytes]) => [name, bytes.join(',')]);
 const EVENT_CPI_KEY = ANCHOR_EVENT_CPI.join(',');
@@ -42,22 +43,53 @@ export function decodePumpEvent(ix) {
   try {
     if (name === 'TradeEvent') {
       const mint = pk();
-      const quoteAmount = Number(u64()) / LAMPORTS_PER_SOL;
-      const tokenAmount = Number(u64()) / 1e6;
+      // Keep raw quote/reserve integers so callers can re-scale for USDC (6 dp) vs SOL (9 dp).
+      // Default human fields use SOL scale for backward compatibility with legacy SOL curves.
+      const quoteAmountRaw = Number(u64());
+      const tokenAmountRaw = Number(u64());
+      const quoteAmount = quoteAmountRaw / LAMPORTS_PER_SOL;
+      const tokenAmount = tokenAmountRaw / 1e6;
       const isBuy = d[o++] === 1;
       const user = pk();
       const timestamp = Number(u64());
-      const vSol = Number(u64()) / LAMPORTS_PER_SOL;
-      const vTok = Number(u64()) / 1e6;
-      const rSol = Number(u64()) / LAMPORTS_PER_SOL;
-      const rTok = Number(u64()) / 1e6;
+      const virtualQuoteReservesRaw = Number(u64());
+      const virtualTokenReservesRaw = Number(u64());
+      const realQuoteReservesRaw = Number(u64());
+      const realTokenReservesRaw = Number(u64());
+      const vSol = virtualQuoteReservesRaw / LAMPORTS_PER_SOL;
+      const vTok = virtualTokenReservesRaw / 1e6;
+      const rSol = realQuoteReservesRaw / LAMPORTS_PER_SOL;
+      const rTok = realTokenReservesRaw / 1e6;
       const feeRecipient = pk();
       o += 8; // fee_basis_points
       const fee = Number(u64()) / LAMPORTS_PER_SOL;
       const creator = pk();
       o += 8; // creator_fee_basis_points
       const creatorFee = Number(u64()) / LAMPORTS_PER_SOL;
-      return { type: 'trade', mint, quoteAmount, tokenAmount, isBuy, user, timestamp, vSol, vTok, rSol, rTok, feeRecipient, fee, creator, creatorFee, priceQuote: vTok > 0 ? vSol / vTok : null };
+      return {
+        type: 'trade',
+        mint,
+        quoteAmount,
+        tokenAmount,
+        quoteAmountRaw,
+        tokenAmountRaw,
+        virtualQuoteReservesRaw,
+        virtualTokenReservesRaw,
+        realQuoteReservesRaw,
+        realTokenReservesRaw,
+        isBuy,
+        user,
+        timestamp,
+        vSol,
+        vTok,
+        rSol,
+        rTok,
+        feeRecipient,
+        fee,
+        creator,
+        creatorFee,
+        priceQuote: vTok > 0 ? vSol / vTok : null,
+      };
     }
     if (name === 'CreateEvent') {
       const tokenName = str();
@@ -119,23 +151,27 @@ export function decodePumpIx(ix, signers = []) {
   try {
     if (out.kind === 'buy' || out.kind === 'sell') {
       // All variants: [amount u64][limit u64]. "exact_*_in" variants put the quote amount first.
+      // Modern v2/v3 layouts expose quote_mint at accounts[2] (WSOL or USDC).
+      const quoteMint = modern ? accounts[2] : PROGRAMS.WSOL;
+      const qScale = quoteScale(quoteMint);
       const a = Number(readU64LE(data, 8));
       const b = Number(readU64LE(data, 16));
       if (name.includes('exact_sol_in') || name.includes('exact_quote_in')) {
-        out.solIn = a / LAMPORTS_PER_SOL;
+        out.solIn = a / qScale;
         out.minTokensOut = b / 1e6;
       } else {
         out.tokenAmount = a / 1e6;
-        out.solLimit = b / LAMPORTS_PER_SOL; // max_sol_cost (buy) / min_sol_output (sell)
+        out.solLimit = b / qScale; // max quote cost (buy) / min quote output (sell)
       }
       if (modern) {
         out.mint = accounts[1];
-        out.quoteMint = accounts[2];
+        out.quoteMint = quoteMint;
         out.user = firstSigner || accounts[8] || null;
         out.feeRecipient = null; // read from TradeEvent instead
         out.bondingCurve = accounts[5] && accounts[5] !== out.user ? accounts[5] : null;
       } else {
         out.mint = accounts[2];
+        out.quoteMint = PROGRAMS.WSOL;
         out.user = accounts[6] || firstSigner;
         out.feeRecipient = accounts[1];
         out.bondingCurve = accounts[3];
@@ -368,7 +404,19 @@ export function txInitialisesMint(tx, mint) {
  */
 export function classifyForMint(rec, mint, wallet) {
   const ev = rec.pumpEvents?.find((e) => e.type === 'trade' && e.mint === mint && e.user === wallet);
-  if (ev) return { side: ev.isBuy ? 'buy' : 'sell', tokens: ev.tokenAmount, sol: ev.quoteAmount, priceQuote: ev.priceQuote, fromEvent: true };
+  if (ev) {
+    const quoteMint = quoteMintFromIxs(rec.pumpIxs, wallet);
+    const q = tradeQuoteAmounts(ev, quoteMint);
+    return {
+      side: ev.isBuy ? 'buy' : 'sell',
+      tokens: q.tokenAmount,
+      sol: q.quoteAmount,
+      priceQuote: q.priceQuote,
+      quoteMint: q.quoteMint,
+      quoteSymbol: q.quoteSymbol,
+      fromEvent: true,
+    };
+  }
   const td = rec.tokenDeltas.find((d) => d.owner === wallet && d.mint === mint);
   if (!td) return { side: null, tokens: 0, sol: 0 };
   const solChange = (rec.solDelta[wallet] || 0) / LAMPORTS_PER_SOL;
