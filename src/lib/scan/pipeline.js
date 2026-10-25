@@ -190,7 +190,7 @@ export async function runScan(rpc, identifier, opts = {}) {
   // Start the dev profile now (one HTTP request, cached) so it is ready by the time the operator stage
   // runs — and surface the headline fact ("this wallet has launched 5,092 tokens") as early as possible.
   if (settings.operatorHistory && report.creation.creator) {
-    creatorProfile(report.creation.creator, { currentMint: report.mint, log })
+    creatorProfile(report.creation.creator, { currentMint: report.mint, launchProgram: report.creation.launchProgram, dexId: report.market?.dexId, log })
       .then((p) => {
         if (p?.available && !report.operator) {
           report.devProfile = profileSummary(p);
@@ -396,8 +396,8 @@ export async function runScan(rpc, identifier, opts = {}) {
         // ever launched, and on-chain sampling for launches that other cluster wallets bundled.
         const linkerCreators = cluster.linkers.slice(0, 3);
         const [profile, linkerProfiles, prior] = await Promise.all([
-          creatorProfile(creator, { currentMint: report.mint, log }),
-          Promise.all(linkerCreators.map((w) => creatorProfile(w, { currentMint: report.mint, log }).catch(() => ({ available: false })))),
+          creatorProfile(creator, { currentMint: report.mint, launchProgram: report.creation?.launchProgram, dexId: report.market?.dexId, log }),
+          Promise.all(linkerCreators.map((w) => creatorProfile(w, { currentMint: report.mint, launchProgram: report.creation?.launchProgram, dexId: report.market?.dexId, log }).catch(() => ({ available: false })))),
           discoverPriorLaunches(hrpc, report.mint, cluster, sigLists, {
             memory: opts.memory,
             maxWallets: settings.maxOperatorWallets,
