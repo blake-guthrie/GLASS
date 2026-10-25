@@ -2,7 +2,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { creatorProfile, summarise, classifyArchetype, toPriorLaunches, normaliseCoin } from '../src/lib/scan/devprofile.js';
+import { creatorProfile, summarise, classifyArchetype, toPriorLaunches, normaliseCoin, detectLaunchpad, fetchCoin } from '../src/lib/scan/devprofile.js';
+import { PROGRAMS } from '../src/lib/constants.js';
 import { rateOperator } from '../src/lib/scan/operator.js';
 import { callFor, computeScore } from '../src/lib/scan/score.js';
 
@@ -193,4 +194,191 @@ test('creatorProfile: 5,202 coins — API cannot list them all, so "2,000+" and 
   const rating = rateOperator(toPriorLaunches(p, W), { marketCapUsd: 5000, profile: p });
   assert.match(rating.reasons[0], /2,000\+ tokens/);
   assert.match(rating.reasons[0], /per day lately/);
+});
+
+test('creatorProfile: Bonk (letsbonk.fun) creator history via Raydium LaunchLab', async () => {
+  globalThis.fetch = async (url) => {
+    if (url.includes('launch-mint-v1.raydium.io/get/by/user')) {
+      return new Response(
+        JSON.stringify({
+          success: true,
+          data: {
+            rows: [
+              {
+                mint: 'BonkMint11111111111111111111111111111111bonk',
+                name: 'Bonk Doge',
+                symbol: 'BDOGE',
+                creator: 'BonkCreator111',
+                createAt: 1760000000000,
+                athAt: 1760000900000,
+                marketCap: 42000,
+                athMarketCap: 120000,
+                finishingRate: 100,
+                migrateAmmId: 'RayPool111111111111111111111111111111111111',
+                platformInfo: { name: 'LetsBonk.fun', pubKey: PROGRAMS.BONK_PLATFORM_CONFIG },
+              },
+              {
+                mint: 'BonkMint22222222222222222222222222222222bonk',
+                name: 'Bonk Cat',
+                symbol: 'BCAT',
+                creator: 'BonkCreator111',
+                createAt: 1759900000000,
+                marketCap: 4500,
+                athMarketCap: 6200,
+                finishingRate: 12,
+                platformInfo: { name: 'LetsBonk.fun', pubKey: PROGRAMS.BONK_PLATFORM_CONFIG },
+              },
+            ],
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }
+    return new Response('[]', { status: 200 });
+  };
+  const p = await creatorProfile('BonkCreator111', {
+    currentMint: 'BonkMint11111111111111111111111111111111bonk',
+    launchpad: 'bonk',
+  });
+  assert.equal(p.available, true);
+  assert.equal(p.source, 'bonk');
+  assert.equal(p.totalCreated, 2);
+  assert.equal(p.current.symbol, 'BDOGE');
+  assert.equal(p.current.graduated, true);
+  assert.equal(p.current.url, 'https://letsbonk.fun/token/BonkMint11111111111111111111111111111111bonk');
+  assert.equal(p.sample.length, 1);
+  assert.equal(p.sample[0].symbol, 'BCAT');
+  const prior = toPriorLaunches(p, 'BonkCreator111');
+  assert.equal(prior.length, 1);
+  assert.equal(prior[0].source, 'bonk');
+  assert.ok(prior[0].linkedBy[0].how.includes('bonk record'));
+  const rating = rateOperator(prior, { profile: p });
+  assert.ok(rating.reasons.some((r) => r.includes('Bonk')));
+});
+
+test('creatorProfile: Raydium LaunchLab creator history via launchProgram detection', async () => {
+  globalThis.fetch = async (url) => {
+    if (url.includes('launch-mint-v1.raydium.io/get/by/user')) {
+      return new Response(
+        JSON.stringify({
+          data: {
+            rows: [
+              {
+                mint: 'LLMint11111111111111111111111111111111111111',
+                name: 'Ray Lab One',
+                symbol: 'RLAB1',
+                creator: 'LaunchLabCreator222',
+                createAt: 1760100000,
+                athAt: 1760101800,
+                marketCap: 88000,
+                athMarketCap: 310000,
+                complete: true,
+                migrateAmmId: 'RayCpmmPool11111111111111111111111111111111',
+                platformInfo: { name: 'Raydium LaunchLab', pubKey: 'RayPlat111111111111111111111111111111111111' },
+              },
+            ],
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }
+    return new Response('[]', { status: 200 });
+  };
+  const p = await creatorProfile('LaunchLabCreator222', {
+    currentMint: 'other',
+    launchProgram: PROGRAMS.RAYDIUM_LAUNCHLAB,
+  });
+  assert.equal(p.available, true);
+  assert.equal(p.source, 'launchlab');
+  assert.equal(p.totalCreated, 1);
+  assert.equal(p.sample[0].symbol, 'RLAB1');
+  assert.equal(p.sample[0].graduated, true);
+  assert.equal(p.sample[0].minutesToPeak, 30);
+  const rating = rateOperator(toPriorLaunches(p, 'LaunchLabCreator222'), { profile: p });
+  assert.ok(rating.reasons.some((r) => r.includes('Raydium LaunchLab')));
+});
+
+test('creatorProfile: Meteora DBC creator history + automatic fallback when pump.fun has 0 coins', async () => {
+  globalThis.fetch = async (url) => {
+    if (url.includes('dbc-api.meteora.ag/pools')) {
+      return new Response(
+        JSON.stringify({
+          data: [
+            {
+              baseMint: 'MetMint1111111111111111111111111111111111111',
+              poolAddress: 'MetPool1111111111111111111111111111111111111',
+              name: 'Meteora Comet',
+              symbol: 'MCOMET',
+              creator: 'MeteoraCreator333',
+              createdAt: 1760200000000,
+              athAt: 1760203600000,
+              marketCap: 95000,
+              athMarketCap: 410000,
+              isMigrated: true,
+            },
+            {
+              baseMint: 'MetMint2222222222222222222222222222222222222',
+              poolAddress: 'MetPool2222222222222222222222222222222222222',
+              name: 'Meteora Dust',
+              symbol: 'MDUST',
+              creator: 'MeteoraCreator333',
+              createdAt: 1760150000000,
+              marketCap: 3200,
+              athMarketCap: 5100,
+              isMigrated: false,
+            },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }
+    return new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  const p = await creatorProfile('MeteoraCreator333', {
+    currentMint: 'MetMint1111111111111111111111111111111111111',
+  });
+  assert.equal(p.available, true);
+  assert.equal(p.source, 'meteora');
+  assert.equal(p.totalCreated, 2);
+  assert.equal(p.current.symbol, 'MCOMET');
+  assert.equal(p.current.graduated, true);
+  assert.equal(p.sample.length, 1);
+  assert.equal(p.sample[0].symbol, 'MDUST');
+  assert.equal(p.sample[0].dexId, 'meteora-dbc');
+  const rating = rateOperator(toPriorLaunches(p, 'MeteoraCreator333'), { profile: p });
+  assert.ok(rating.reasons.some((r) => r.includes('Meteora')));
+});
+
+test('fetchCoin & detectLaunchpad: falls back to LaunchLab and Meteora when mint is not on pump.fun', async () => {
+  globalThis.fetch = async (url) => {
+    if (url.includes('launch-mint-v1.raydium.io/get/by/mints')) {
+      return new Response(
+        JSON.stringify({
+          data: {
+            rows: [
+              {
+                mint: 'LLSingleMint999',
+                name: 'Single Lab Coin',
+                symbol: 'SLAB',
+                createAt: 1760300000000,
+                marketCap: 50000,
+                athMarketCap: 150000,
+                complete: true,
+              },
+            ],
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }
+    return new Response('{}', { status: 404 });
+  };
+  assert.equal(detectLaunchpad({ launchProgram: PROGRAMS.RAYDIUM_LAUNCHLAB }), 'launchlab');
+  assert.equal(detectLaunchpad({ launchProgram: PROGRAMS.METEORA_DBC }), 'meteora');
+  assert.equal(detectLaunchpad({ platformInfo: { name: 'LetsBonk.fun' } }), 'bonk');
+  const c = await fetchCoin('LLSingleMint999');
+  assert.ok(c);
+  assert.equal(c.symbol, 'SLAB');
+  assert.equal(c.source, 'launchlab');
+  assert.equal(c.athMcapUsd, 150000);
 });
