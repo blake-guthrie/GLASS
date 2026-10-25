@@ -14,7 +14,10 @@ export const PROGRAMS = {
   JUPITER_V6: 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4',
   RAYDIUM_AMM: '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp4',
   RAYDIUM_CPMM: 'CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C',
+  RAYDIUM_LAUNCHLAB: 'LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj',
+  BONK_PLATFORM_CONFIG: 'FfYek5vEz23cMkWsdJwG2oa6EphsvXSHrGpdALN4g6W1',
   METEORA_DLMM: 'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo',
+  METEORA_DBC: 'dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN',
   WSOL: 'So11111111111111111111111111111111111111112',
 };
 
@@ -25,7 +28,9 @@ export const ROUTER_LABELS = {
   [PROGRAMS.JUPITER_V6]: 'Jupiter',
   [PROGRAMS.RAYDIUM_AMM]: 'Raydium',
   [PROGRAMS.RAYDIUM_CPMM]: 'Raydium CPMM',
+  [PROGRAMS.RAYDIUM_LAUNCHLAB]: 'Raydium LaunchLab',
   [PROGRAMS.METEORA_DLMM]: 'Meteora',
+  [PROGRAMS.METEORA_DBC]: 'Meteora DBC',
   'BSfD6SHZigAfDWSjzD5Q41jw8LmKwtmjskPH9XW1mrRW': 'Photon',
   // Add more router/bot program IDs in src/data/known.json → "programs". Unknown routers are
   // still fingerprinted by address, they just display truncated.
@@ -106,4 +111,6 @@ export const SOURCES = {
   // pump.fun's own public read API: every coin a wallet has ever created, with ATH mcap and graduation.
   // Read-only, no key. GLASS sends nothing but the wallet address.
   pumpfun: 'https://frontend-api-v3.pump.fun',
+  launchlab: 'https://launch-mint-v1.raydium.io',
+  meteora: 'https://dbc-api.meteora.ag',
 };
