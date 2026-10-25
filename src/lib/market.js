@@ -30,6 +30,8 @@ export function normalisePair(p) {
     symbol: p.baseToken?.symbol,
     priceUsd: p.priceUsd ? Number(p.priceUsd) : null,
     priceNative: p.priceNative ? Number(p.priceNative) : null,
+    quoteMint: p.quoteToken?.address ?? null,
+    quoteSymbol: p.quoteToken?.symbol ?? null,
     marketCapUsd: p.marketCap ?? p.fdv ?? null,
     fdvUsd: p.fdv ?? null,
     liquidityUsd: p.liquidity?.usd ?? null,

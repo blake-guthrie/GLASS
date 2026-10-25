@@ -293,6 +293,7 @@ export function extractLaunchEvents(records, mint, creation) {
           tokens: t.tokenAmount,
           sol: t.quoteAmount,
           priceQuote: t.priceQuote,
+          quoteMint: t.quoteMint || null,
           isCreator: t.user === creator,
           slippageLimitSol: pumpIx?.solLimit ?? (pumpIx?.solIn ? pumpIx.solIn : null),
           pumpIxName: pumpIx?.name || null,

@@ -49,6 +49,7 @@ export async function trackCluster(rpc, mint, cluster, { launchTimeSec, supply, 
         // price at the time, from the program's own trade event when present
         const te = (rec.pumpEvents || []).find((e) => e.type === 'trade' && e.mint === mint);
         if (te?.priceQuote) ev.priceQuote = te.priceQuote;
+        if (te?.quoteMint) ev.quoteMint = te.quoteMint;
         if (c.side === 'transfer_out') {
           const tr = rec.splTransfers.find((x) => x.mint === mint && x.fromOwner === wallet);
           ev.to = tr?.toOwner || null;

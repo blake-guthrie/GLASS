@@ -1,8 +1,8 @@
 // Real-time watcher: one WebSocket to the RPC, accountSubscribe on every cluster wallet's token
 // account for the mint (balance changes = buys / sells / transfers, sub-second) and on the pump.fun
 // bonding curve (live price / market cap from its virtual reserves). No polling, no page scraping.
-import { PROGRAMS } from './constants.js';
-import { decodeBase58 } from './base58.js';
+import { PROGRAMS, quoteDecimals } from './constants.js';
+import { decodeBase58, encodeBase58 } from './base58.js';
 import { findProgramAddress } from './pda.js';
 
 const LAMPORTS = 1e9;
@@ -35,13 +35,20 @@ export function decodeCurve(b64) {
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     if (bytes.length < 49) return null;
+    // Layout: 8 discriminator + 5×u64 + complete flag (49 bytes). Quote-hardened curves (v2)
+    // append the quote mint after the flag — legacy SOL curves are exactly 49 bytes.
+    let quoteMint = null;
+    if (bytes.length >= 81) {
+      try { quoteMint = encodeBase58(bytes.subarray(49, 81)); } catch { quoteMint = null; }
+    }
+    const qd = quoteMint ? quoteDecimals(quoteMint) : 9;
     const vTok = readU64(bytes, 8) / 1e6;
-    const vSol = readU64(bytes, 16) / LAMPORTS;
+    const vSol = readU64(bytes, 16) / 10 ** qd;
     const rTok = readU64(bytes, 24) / 1e6;
-    const rSol = readU64(bytes, 32) / LAMPORTS;
+    const rSol = readU64(bytes, 32) / 10 ** qd;
     const supply = readU64(bytes, 40) / 1e6;
     const complete = bytes[48] === 1;
-    return { vTok, vSol, rTok, rSol, supply, complete, priceSol: vTok > 0 ? vSol / vTok : null };
+    return { vTok, vSol, rTok, rSol, supply, complete, quoteMint, quoteDecimals: qd, priceSol: vTok > 0 ? vSol / vTok : null };
   } catch {
     return null;
   }
