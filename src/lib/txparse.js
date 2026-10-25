@@ -42,22 +42,51 @@ export function decodePumpEvent(ix) {
   try {
     if (name === 'TradeEvent') {
       const mint = pk();
-      const quoteAmount = Number(u64()) / LAMPORTS_PER_SOL;
-      const tokenAmount = Number(u64()) / 1e6;
+      const quoteAmountRaw = Number(u64());
+      const tokenAmountRaw = Number(u64());
+      const quoteAmount = quoteAmountRaw / LAMPORTS_PER_SOL;
+      const tokenAmount = tokenAmountRaw / 1e6;
       const isBuy = d[o++] === 1;
       const user = pk();
       const timestamp = Number(u64());
-      const vSol = Number(u64()) / LAMPORTS_PER_SOL;
-      const vTok = Number(u64()) / 1e6;
-      const rSol = Number(u64()) / LAMPORTS_PER_SOL;
-      const rTok = Number(u64()) / 1e6;
+      const virtualQuoteReservesRaw = Number(u64());
+      const virtualTokenReservesRaw = Number(u64());
+      const realQuoteReservesRaw = Number(u64());
+      const realTokenReservesRaw = Number(u64());
+      const vSol = virtualQuoteReservesRaw / LAMPORTS_PER_SOL;
+      const vTok = virtualTokenReservesRaw / 1e6;
+      const rSol = realQuoteReservesRaw / LAMPORTS_PER_SOL;
+      const rTok = realTokenReservesRaw / 1e6;
       const feeRecipient = pk();
       o += 8; // fee_basis_points
       const fee = Number(u64()) / LAMPORTS_PER_SOL;
       const creator = pk();
       o += 8; // creator_fee_basis_points
       const creatorFee = Number(u64()) / LAMPORTS_PER_SOL;
-      return { type: 'trade', mint, quoteAmount, tokenAmount, isBuy, user, timestamp, vSol, vTok, rSol, rTok, feeRecipient, fee, creator, creatorFee, priceQuote: vTok > 0 ? vSol / vTok : null };
+      return {
+        type: 'trade',
+        mint,
+        quoteAmount,
+        tokenAmount,
+        quoteAmountRaw,
+        tokenAmountRaw,
+        virtualQuoteReservesRaw,
+        virtualTokenReservesRaw,
+        realQuoteReservesRaw,
+        realTokenReservesRaw,
+        isBuy,
+        user,
+        timestamp,
+        vSol,
+        vTok,
+        rSol,
+        rTok,
+        feeRecipient,
+        fee,
+        creator,
+        creatorFee,
+        priceQuote: vTok > 0 ? vSol / vTok : null,
+      };
     }
     if (name === 'CreateEvent') {
       const tokenName = str();
@@ -119,14 +148,16 @@ export function decodePumpIx(ix, signers = []) {
   try {
     if (out.kind === 'buy' || out.kind === 'sell') {
       // All variants: [amount u64][limit u64]. "exact_*_in" variants put the quote amount first.
+      const quoteMint = modern ? accounts[2] : null;
+      const quoteScale = quoteMint === PROGRAMS.USDC || quoteMint === PROGRAMS.USDT ? 1e6 : LAMPORTS_PER_SOL;
       const a = Number(readU64LE(data, 8));
       const b = Number(readU64LE(data, 16));
       if (name.includes('exact_sol_in') || name.includes('exact_quote_in')) {
-        out.solIn = a / LAMPORTS_PER_SOL;
+        out.solIn = a / quoteScale;
         out.minTokensOut = b / 1e6;
       } else {
         out.tokenAmount = a / 1e6;
-        out.solLimit = b / LAMPORTS_PER_SOL; // max_sol_cost (buy) / min_sol_output (sell)
+        out.solLimit = b / quoteScale; // max_sol_cost (buy) / min_sol_output (sell)
       }
       if (modern) {
         out.mint = accounts[1];

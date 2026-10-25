@@ -28,6 +28,8 @@ export function normalisePair(p) {
     mint: p.baseToken?.address,
     name: p.baseToken?.name,
     symbol: p.baseToken?.symbol,
+    quoteMint: p.quoteToken?.address || null,
+    quoteSymbol: p.quoteToken?.symbol || null,
     priceUsd: p.priceUsd ? Number(p.priceUsd) : null,
     priceNative: p.priceNative ? Number(p.priceNative) : null,
     marketCapUsd: p.marketCap ?? p.fdv ?? null,
@@ -154,13 +156,45 @@ export async function geckoOhlcv(pool, timeframe = 'minute', aggregate = 5, limi
 }
 
 /**
- * Price history summary for a mint: peak price/mcap, time to peak, first candle, current.
- * Uses GeckoTerminal; supply defaults to pump.fun's 1B.
+ * Supply implied by DexScreener's market data. Needed because pump.fun's 1B is
+ * only right for pump tokens: a USDC-quoted pair (or any non-pump token) has a
+ * different supply, and using 1B there makes the market cap wrong by orders of
+ * magnitude in every tool that reads `priceHistory`.
  */
-export async function priceHistory(mint, { supply = PUMP_TOTAL_SUPPLY, createdAtMs } = {}) {
+export function impliedSupply({ marketCapUsd, fdvUsd, priceUsd } = {}) {
+  const price = Number(priceUsd);
+  if (!Number.isFinite(price) || price <= 0) return null;
+  const mcap = Number(marketCapUsd);
+  if (Number.isFinite(mcap) && mcap > 0) return mcap / price;
+  const fdv = Number(fdvUsd);
+  if (Number.isFinite(fdv) && fdv > 0) return fdv / price;
+  return null;
+}
+
+/** Supply for a mint: explicit > implied by DexScreener > pump.fun default. */
+export async function resolveSupply(mint, explicit) {
+  if (Number.isFinite(explicit) && explicit > 0) return { supply: explicit, source: 'caller' };
+  try {
+    const { best } = await dexTokenInfo(mint);
+    const implied = impliedSupply(best || {});
+    if (implied && implied > 0) return { supply: implied, source: 'dexscreener' };
+  } catch {
+    /* fall back to default */
+  }
+  return { supply: PUMP_TOTAL_SUPPLY, source: 'pump-default' };
+}
+
+/**
+ * Price history summary for a mint: peak price/mcap, time to peak, first candle, current.
+ * Uses GeckoTerminal. Supply comes from the caller, or is derived from DexScreener
+ * (which is what makes USDC-quoted pairs report the right market cap).
+ */
+export async function priceHistory(mint, { supply = null, createdAtMs } = {}) {
   return cached(`hist:${mint}`, 120_000, async () => {
     const { top, pools } = await geckoTopPool(mint);
     if (!top) return { available: false, pools: [] };
+    const resolved = await resolveSupply(mint, supply);
+    supply = resolved.supply;
     const ageMs = Date.now() - (top.createdAt || createdAtMs || Date.now());
     const candles = [];
     // Fine candles for the first ~3.5 days, hourly beyond, daily beyond ~40 days.
@@ -180,6 +214,8 @@ export async function priceHistory(mint, { supply = PUMP_TOTAL_SUPPLY, createdAt
     const peakMcap = peak.h * supply;
     const result = {
       available: true,
+      supply,
+      supplySource: resolved.source,
       top,
       pools: pools.map((p) => p.address),
       candles: candles.length,
@@ -225,4 +261,10 @@ export async function jitoBundleId(sig) {
   } catch {
     return null;
   }
+}
+
+export function quoteToUsdMultiplier(quoteMint, solPrice, quoteSymbol = null) {
+  if (quoteMint === PROGRAMS.USDC || quoteMint === PROGRAMS.USDT || /^USD[CT]?$/i.test(quoteSymbol || '')) return 1;
+  if (!quoteMint || quoteMint === PROGRAMS.WSOL || /^WSOL|SOL$/i.test(quoteSymbol || '')) return solPrice ?? null;
+  return null;
 }

@@ -2,7 +2,7 @@
 // cluster dumped, a bullish/bearish bundle rating, and a historical exit zone for this launch.
 import { parseTx } from '../txparse.js';
 import { pMap } from '../http.js';
-import { dexTokensBulk, priceHistory, solPriceUsd } from '../market.js';
+import { dexTokensBulk, impliedSupply, priceHistory, solPriceUsd } from '../market.js';
 import { derivePumpAccounts } from './launch.js';
 import { PUMP_TOTAL_SUPPLY, PROGRAMS } from '../constants.js';
 
@@ -226,7 +226,8 @@ export async function analysePriorLaunches(rpc, launches, cluster, sigLists, { s
     async (l, idx) => {
       const d = dex[l.mint];
       if (!l.createdAt && d?.pairCreatedAt) l.createdAt = d.pairCreatedAt; // creation older than the RPC's history → DexScreener's timestamp
-      let hist = await priceHistory(l.mint, { supply, createdAtMs: l.createdAt || undefined });
+      const launchSupply = impliedSupply(d || {}) || supply;
+      let hist = await priceHistory(l.mint, { supply: launchSupply, createdAtMs: l.createdAt || undefined });
       // Cluster exit on that launch: sample the cluster wallets' sells of that mint
       let exit = null;
       if (idx < maxDeep) exit = await clusterExitOnLaunch(rpc, l, cluster, sigLists, hist, supply, solUsd);
@@ -503,7 +504,7 @@ export function rateOperator(launches, current = {}) {
   const infra = usable.filter((l) => l.viaInfra && l.relation !== 'created').length;
   if (profile) {
     const p = profile;
-    const cnt = `${p.totalCreated.toLocaleString()}${p.atLeast ? '+' : ''}`;
+    const cnt = `${p.totalCreated.toLocaleString('en-US')}${p.atLeast ? '+' : ''}`;
     const since = p.firstCreatedAt ? ` since ${new Date(p.firstCreatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: p.spanDays > 300 ? 'numeric' : undefined })}` : '';
     const rate = p.perDay != null && p.totalCreated >= 5 ? (p.perDay >= 1 ? ` (≈${Math.round(p.perDay)} per day${p.perDayRecent ? ' lately' : ''})` : p.perDay * 7 >= 1 ? ` (≈${Math.round(p.perDay * 7)} per week${p.perDayRecent ? ' lately' : ''})` : '') : '';
     r.push(`This creator wallet has launched ${cnt} token${p.totalCreated === 1 ? '' : 's'} on pump.fun${since}${rate}${p.last24hAtLeast ? `, ${p.last24h}+ in the last 24 h` : p.last24h >= 3 ? `, ${p.last24h} in the last 24 h` : ''}`);

@@ -87,7 +87,7 @@ export function callFor({ score, launch, wallets, live, operator, ctx = {} }) {
   let level;
   if (farm) {
     level = 'avoid';
-    why.push(`token farm: this wallet has launched ${prof.totalCreated.toLocaleString()}${prof.atLeast ? '+' : ''} tokens${prof.stats?.ranRate != null ? `, ${Math.round((1 - prof.stats.ranRate) * 100)}% never ran` : ''}`);
+    why.push(`token farm: this wallet has launched ${prof.totalCreated.toLocaleString('en-US')}${prof.atLeast ? '+' : ''} tokens${prof.stats?.ranRate != null ? `, ${Math.round((1 - prof.stats.ranRate) * 100)}% never ran` : ''}`);
   } else if (dumping && (soldShare == null || soldShare >= 0.3)) {
     level = 'avoid';
     const devOnly = (s.walletsTracked || 0) <= 1;
@@ -202,7 +202,7 @@ function verdictFor(score, operator, launch, live) {
     tone = 'bullish';
   } else if (operator.score >= 40) sub = `Operator history is mixed (${operator.score}/100). Some launches ran, some were dumped early.`;
   else if (op === 'Token farm') {
-    sub = `Dev score ${operator.score}/100 — token farm: this wallet mass-mints tokens and sells the dev bag into whoever buys${operator.profile?.totalCreated ? ` (${operator.profile.totalCreated.toLocaleString()} so far)` : ''}.`;
+    sub = `Dev score ${operator.score}/100 — token farm: this wallet mass-mints tokens and sells the dev bag into whoever buys${operator.profile?.totalCreated ? ` (${operator.profile.totalCreated.toLocaleString('en-US')} so far)` : ''}.`;
     tone = 'bearish';
   } else {
     sub = `Dev score ${operator.score}/100 (${op.toLowerCase()}): they usually sell early and their launches rarely run.`;
