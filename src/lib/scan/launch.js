@@ -1,6 +1,7 @@
 // Stage 1: find the creation transaction, then collect every transaction that touched the mint
 // in the launch window (creation slot + N) and the early window (first N seconds).
 import { PROGRAMS, AVG_SLOT_MS, LAMPORTS_PER_SOL } from '../constants.js';
+import { tradeQuoteAmounts, quoteMintFromIxs } from '../quote.js';
 import { findProgramAddress, isOnCurve } from '../pda.js';
 import { decodeBase58 } from '../base58.js';
 import { parseTx, txInitialisesMint } from '../txparse.js';
@@ -286,13 +287,18 @@ export function extractLaunchEvents(records, mint, creation) {
     if (trades.length) {
       for (const t of trades) {
         const pumpIx = rec.pumpIxs.find((p) => p.user === t.user) || rec.pumpIxs[0] || null;
+        const quoteMint = quoteMintFromIxs(rec.pumpIxs, t.user);
+        const q = tradeQuoteAmounts(t, quoteMint);
         events.push({
           ...base,
           wallet: t.user,
           side: t.isBuy ? 'buy' : 'sell',
-          tokens: t.tokenAmount,
-          sol: t.quoteAmount,
-          priceQuote: t.priceQuote,
+          tokens: q.tokenAmount,
+          sol: q.quoteAmount,
+          quoteAmount: q.quoteAmount,
+          quoteMint: q.quoteMint,
+          quoteSymbol: q.quoteSymbol,
+          priceQuote: q.priceQuote,
           isCreator: t.user === creator,
           slippageLimitSol: pumpIx?.solLimit ?? (pumpIx?.solIn ? pumpIx.solIn : null),
           pumpIxName: pumpIx?.name || null,
