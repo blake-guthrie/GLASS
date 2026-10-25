@@ -142,8 +142,8 @@ export async function geckoTopPool(mint) {
   });
 }
 
-export async function geckoOhlcv(pool, timeframe = 'minute', aggregate = 5, limit = 1000, beforeTs) {
-  const q = new URLSearchParams({ aggregate: String(aggregate), limit: String(limit), currency: 'usd' });
+export async function geckoOhlcv(pool, timeframe = 'minute', aggregate = 5, limit = 1000, beforeTs, token = 'base') {
+  const q = new URLSearchParams({ aggregate: String(aggregate), limit: String(limit), currency: 'usd', token });
   if (beforeTs) q.set('before_timestamp', String(beforeTs));
   try {
     const r = await geckoFetch(`${SOURCES.gecko}/networks/solana/pools/${pool}/ohlcv/${timeframe}?${q}`);
@@ -164,12 +164,13 @@ export async function priceHistory(mint, { supply = PUMP_TOTAL_SUPPLY, createdAt
     const ageMs = Date.now() - (top.createdAt || createdAtMs || Date.now());
     const candles = [];
     // Fine candles for the first ~3.5 days, hourly beyond, daily beyond ~40 days.
-    candles.push(...(await geckoOhlcv(top.address, 'minute', 5, 1000)));
-    if (ageMs > 3.3 * 86400e3) candles.push(...(await geckoOhlcv(top.address, 'hour', 1, 1000)));
-    if (ageMs > 40 * 86400e3) candles.push(...(await geckoOhlcv(top.address, 'day', 1, 1000)));
+    // USD is the denomination, not the token selector. A pool may list this mint on either side.
+    candles.push(...(await geckoOhlcv(top.address, 'minute', 5, 1000, undefined, mint)));
+    if (ageMs > 3.3 * 86400e3) candles.push(...(await geckoOhlcv(top.address, 'hour', 1, 1000, undefined, mint)));
+    if (ageMs > 40 * 86400e3) candles.push(...(await geckoOhlcv(top.address, 'day', 1, 1000, undefined, mint)));
     // For graduated tokens also pull the bonding-curve pool (pre-graduation price path), if listed.
-    const curvePool = pools.find((p) => p !== top && p.dex === 'pumpfun');
-    if (curvePool) candles.push(...(await geckoOhlcv(curvePool.address, 'minute', 5, 1000)));
+    const curvePool = pools.find((p) => p !== top && (p.dex === 'pump-fun' || p.dex === 'pumpfun'));
+    if (curvePool) candles.push(...(await geckoOhlcv(curvePool.address, 'minute', 5, 1000, undefined, mint)));
     if (!candles.length) return { available: false, pools: pools.map((p) => p.address), top };
     candles.sort((a, b) => a.t - b.t);
     let peak = candles[0];
