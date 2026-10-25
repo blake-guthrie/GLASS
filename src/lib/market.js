@@ -159,7 +159,10 @@ export async function geckoOhlcv(pool, timeframe = 'minute', aggregate = 5, limi
  * Uses GeckoTerminal; supply defaults to pump.fun's 1B.
  */
 export async function priceHistory(mint, { supply = PUMP_TOTAL_SUPPLY, createdAtMs } = {}) {
-  return cached(`hist:${mint}`, 120_000, async () => {
+  // Caps and launch-relative checkpoints depend on these inputs, not only the mint.
+  // Falsey creation times already use the pool/candle fallback below.
+  const historyKey = JSON.stringify([mint, supply, createdAtMs || null]);
+  return cached(`hist:${historyKey}`, 120_000, async () => {
     const { top, pools } = await geckoTopPool(mint);
     if (!top) return { available: false, pools: [] };
     const ageMs = Date.now() - (top.createdAt || createdAtMs || Date.now());
