@@ -1,0 +1,109 @@
+{
+  "manifest_version": 3,
+  "name": "GLASS — Solana launch scanner",
+  "short_name": "GLASS",
+  "version": "0.3.3",
+  "description": "Who really bought the launch, how the wallets link, and the dev's full track record — on every Solana token page.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "GLASS settings",
+    "default_popup": "src/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "background": {
+    "scripts": [
+      "src/background.js"
+    ],
+    "type": "module"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "glass-extension@solana.org",
+      "strict_min_version": "109.0"
+    }
+  },
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://solana-rpc.publicnode.com/*",
+    "https://api.zan.top/*",
+    "https://api.mainnet-beta.solana.com/*",
+    "https://*.helius-rpc.com/*",
+    "https://*.quiknode.pro/*",
+    "https://*.rpcpool.com/*",
+    "https://*.triton.one/*",
+    "https://*.alchemy.com/*",
+    "https://*.ankr.com/*",
+    "https://*.shyft.to/*",
+    "https://*.chainstack.com/*",
+    "https://frontend-api-v3.pump.fun/*",
+    "https://api.dexscreener.com/*",
+    "https://api.geckoterminal.com/*",
+    "https://bundles.jito.wtf/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://pump.fun/*",
+        "https://*.pump.fun/*",
+        "https://axiom.trade/*",
+        "https://*.axiom.trade/*",
+        "https://photon-sol.tinyastro.io/*",
+        "https://bullx.io/*",
+        "https://*.bullx.io/*",
+        "https://gmgn.ai/*",
+        "https://*.gmgn.ai/*",
+        "https://dexscreener.com/*",
+        "https://*.padre.gg/*",
+        "https://padre.gg/*",
+        "https://birdeye.so/*",
+        "https://*.birdeye.so/*",
+        "https://solscan.io/*"
+      ],
+      "js": [
+        "src/sites/urls.js",
+        "src/content.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "icons/icon48.png"
+      ],
+      "matches": [
+        "https://pump.fun/*",
+        "https://*.pump.fun/*",
+        "https://axiom.trade/*",
+        "https://*.axiom.trade/*",
+        "https://photon-sol.tinyastro.io/*",
+        "https://bullx.io/*",
+        "https://*.bullx.io/*",
+        "https://gmgn.ai/*",
+        "https://*.gmgn.ai/*",
+        "https://dexscreener.com/*",
+        "https://*.padre.gg/*",
+        "https://padre.gg/*",
+        "https://birdeye.so/*",
+        "https://*.birdeye.so/*",
+        "https://solscan.io/*"
+      ]
+    }
+  ]
+}
