@@ -1,9 +1,9 @@
 // Stage 1: find the creation transaction, then collect every transaction that touched the mint
 // in the launch window (creation slot + N) and the early window (first N seconds).
-import { PROGRAMS, AVG_SLOT_MS, LAMPORTS_PER_SOL } from '../constants.js';
+import { PROGRAMS, AVG_SLOT_MS } from '../constants.js';
 import { findProgramAddress, isOnCurve } from '../pda.js';
 import { decodeBase58 } from '../base58.js';
-import { parseTx, txInitialisesMint } from '../txparse.js';
+import { parseTx, txInitialisesMint, tradeQuote, quoteDelta } from '../txparse.js';
 
 export async function derivePumpAccounts(mint) {
   const mintBytes = decodeBase58(mint);
@@ -293,6 +293,8 @@ export function extractLaunchEvents(records, mint, creation) {
           tokens: t.tokenAmount,
           sol: t.quoteAmount,
           priceQuote: t.priceQuote,
+          quoteMint: t.quoteMint,
+          quoteUsd: t.quoteUsd,
           isCreator: t.user === creator,
           slippageLimitSol: pumpIx?.solLimit ?? (pumpIx?.solIn ? pumpIx.solIn : null),
           pumpIxName: pumpIx?.name || null,
@@ -302,9 +304,11 @@ export function extractLaunchEvents(records, mint, creation) {
       continue;
     }
 
-    // Fallback: token balance deltas + SOL into/out of the curve (PumpSwap/Raydium routes, odd txs).
+    // Fallback: token balance deltas + quote (SOL, or USDC for USDC-quoted curves) into/out of the curve
+    // (PumpSwap/Raydium routes, odd txs).
     // Off-curve owners (pools, vaults, PDAs — e.g. the PumpSwap pool receiving the migration) are not buyers.
-    const curveDelta = creation.generic ? 0 : (rec.solDelta[curve] || 0) / LAMPORTS_PER_SOL;
+    const quote = tradeQuote(rec, mint);
+    const curveDelta = creation.generic ? 0 : quoteDelta(rec, quote, curve);
     const deltas = rec.tokenDeltas.filter((d) => d.mint === mint && d.owner !== curve && Math.abs(d.delta) > 0 && isWallet(d.owner));
     if (!deltas.length) continue;
     const buys = deltas.filter((d) => d.delta > 0);
@@ -313,7 +317,7 @@ export function extractLaunchEvents(records, mint, creation) {
       const isBuy = d.delta > 0;
       // SOL paid: pump.fun → share of the curve's SOL delta; other launchpads → the wallet's own SOL change
       // (minus fees is close enough; WSOL-wrapped routes show up as the wallet's lamport delta too).
-      const ownDelta = Math.abs((rec.solDelta[d.owner] || 0) / LAMPORTS_PER_SOL);
+      const ownDelta = Math.abs(quoteDelta(rec, quote, d.owner));
       const solShare = isBuy && curveDelta > 0 ? (curveDelta * d.delta) / totalBuyTokens : curveDelta < 0 && !isBuy ? -curveDelta : ownDelta;
       const pumpIx = rec.pumpIxs.find((p) => p.user === d.owner) || rec.pumpIxs[0] || null;
       events.push({
@@ -323,6 +327,8 @@ export function extractLaunchEvents(records, mint, creation) {
         tokens: Math.abs(d.delta),
         sol: solShare,
         priceQuote: null,
+        quoteMint: quote.mint,
+        quoteUsd: quote.usd,
         isCreator: d.owner === creator,
         slippageLimitSol: pumpIx?.solLimit ?? null,
         pumpIxName: pumpIx?.name || null,

@@ -10,6 +10,8 @@ import { discoverPriorLaunches, analysePriorLaunches, rateOperator, devExitOnLau
 import { creatorProfile, toPriorLaunches, fetchCoin } from './devprofile.js';
 import { computeScore } from './score.js';
 import { dexTokenInfo, jitoBundleId, solPriceUsd } from '../market.js';
+import { quoteInfo, mcapUsdFromQuote } from '../quote.js';
+import { tradeQuote } from '../txparse.js';
 import { pMap } from '../http.js';
 import known from '../../data/known.js';
 
@@ -250,16 +252,22 @@ export async function runScan(rpc, identifier, opts = {}) {
       log(`fee wallet check failed: ${e.message}`);
     }
     report.launch = analysis;
+    // The curve's quote asset (SOL, or USDC for USDC-quoted pairs) decides how its prices turn into USD;
+    // the panel's live mcap (bonding-curve reserves) reads it from here.
+    report.quote = quoteInfo((events.find((e) => e.fromEvent) || events[0])?.quoteMint || tradeQuote(creation.record, report.mint).mint);
     // Fresh tokens are often not on DexScreener yet: derive mcap from the last trade's reserves, or from
     // the create event's initial virtual reserves when nobody has traded yet.
     if (report.market && report.market.marketCapUsd == null) {
       const last = [...events].reverse().find((e) => e.priceQuote);
       const createEv = creation.record.pumpEvents?.find((e) => e.type === 'create');
       const priceQuote = last?.priceQuote ?? (createEv?.vSol && createEv?.vTok ? createEv.vSol / createEv.vTok : null);
-      const sol = priceQuote ? await solPriceUsd() : null;
-      if (priceQuote && sol) {
-        report.market.marketCapUsd = priceQuote * report.supply * sol;
-        report.market.priceUsd = priceQuote * sol;
+      const quote = last?.quoteMint ? quoteInfo(last.quoteMint) : report.quote;
+      // A USD-stablecoin price is already USD: only SOL-quoted prices need the SOL price.
+      const sol = priceQuote && !quote.usd ? await solPriceUsd() : null;
+      const mcap = mcapUsdFromQuote(priceQuote, report.supply, quote.mint, sol);
+      if (mcap) {
+        report.market.marketCapUsd = mcap;
+        report.market.priceUsd = mcap / report.supply;
         report.market.mcapSource = last ? 'last launch-window trade' : 'initial bonding-curve price (no trades yet)';
         if (!report.market.dexId) report.market.dexId = 'pumpfun';
       }
