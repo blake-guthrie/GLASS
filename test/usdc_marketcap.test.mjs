@@ -70,3 +70,32 @@ test('decodePumpIx: modern buy_exact_quote_in with USDC quote mint uses 6 decima
   assert.equal(decoded.solIn, 100); // 100_000_000 / 1e6 = 100 USDC! (NOT 0.1)
   assert.equal(decoded.quoteIn, 100);
 });
+
+import { decodeCurve } from '../src/lib/livewatch.js';
+
+test('decodeCurve: USDC-quoted bonding curve decodes reserves with 6 decimals', () => {
+  // Construct a mock 49-byte bonding curve buffer in base64:
+  // 8 bytes disc | vTok (1e14 = 100,000,000 tokens) | vSol (30,000,000,000 = 30,000 USDC @ 6 decimals)
+  const buf = new Uint8Array(49);
+  const view = new DataView(buf.buffer);
+  // vTok at offset 8: 100_000_000 * 1e6
+  view.setBigUint64(8, 100_000_000_000_000n, true);
+  // vQuote at offset 16: 30_000 * 1e6 = 30_000_000_000n
+  view.setBigUint64(16, 30_000_000_000n, true);
+  // rTok at offset 24: 793_100_000 * 1e6
+  view.setBigUint64(24, 793_100_000_000_000n, true);
+  // rQuote at offset 32: 0
+  view.setBigUint64(32, 0n, true);
+  // supply at offset 40: 1_000_000_000 * 1e6
+  view.setBigUint64(40, 1_000_000_000_000_000n, true);
+  // complete at offset 48: 0
+  buf[48] = 0;
+
+  const b64 = Buffer.from(buf).toString('base64');
+  const decoded = decodeCurve(b64, 6, true);
+  assert.equal(decoded.vTok, 100_000_000);
+  assert.equal(decoded.vSol, 30_000); // 30,000 USDC
+  assert.equal(decoded.isUsdQuote, true);
+  assert.equal(decoded.priceUsd, 30_000 / 100_000_000);
+  assert.equal(decoded.priceSol, null);
+});
