@@ -255,9 +255,11 @@ export async function runScan(rpc, identifier, opts = {}) {
     if (report.market && report.market.marketCapUsd == null) {
       const last = [...events].reverse().find((e) => e.priceQuote);
       const createEv = creation.record.pumpEvents?.find((e) => e.type === 'create');
-      const priceQuote = last?.priceQuote ?? (createEv?.vSol && createEv?.vTok ? createEv.vSol / createEv.vTok : null);
-      const sol = priceQuote ? await solPriceUsd() : null;
-      if (priceQuote && sol) {
+      const isUsdQuote = Boolean(report.market?.isUsdQuote || last?.isUsdQuote || report.isUsdQuote || (report.quoteMint && report.quoteMint === USDC_MINT));
+      const vSolNorm = isUsdQuote && createEv?.vSol ? (createEv.vSol * LAMPORTS_PER_SOL) / 1e6 : createEv?.vSol;
+      const priceQuote = last?.priceQuote ?? (vSolNorm && createEv?.vTok ? vSolNorm / createEv.vTok : null);
+      const sol = priceQuote && !isUsdQuote ? await solPriceUsd() : 1.0;
+      if (priceQuote && (isUsdQuote || sol)) {
         report.market.marketCapUsd = priceQuote * report.supply * sol;
         report.market.priceUsd = priceQuote * sol;
         report.market.mcapSource = last ? 'last launch-window trade' : 'initial bonding-curve price (no trades yet)';

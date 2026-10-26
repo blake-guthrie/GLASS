@@ -29,19 +29,32 @@ function readU64(bytes, off) {
 }
 
 /** pump.fun BondingCurve account: 8 disc | vTok u64 | vSol u64 | rTok u64 | rSol u64 | supply u64 | complete u8 */
-export function decodeCurve(b64) {
+export function decodeCurve(b64, quoteDecimals = 9, isUsdQuote = false) {
   try {
     const bin = atob(b64);
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     if (bytes.length < 49) return null;
+    const scale = 10 ** (quoteDecimals || 9);
     const vTok = readU64(bytes, 8) / 1e6;
-    const vSol = readU64(bytes, 16) / LAMPORTS;
+    const vSol = readU64(bytes, 16) / scale;
     const rTok = readU64(bytes, 24) / 1e6;
-    const rSol = readU64(bytes, 32) / LAMPORTS;
+    const rSol = readU64(bytes, 32) / scale;
     const supply = readU64(bytes, 40) / 1e6;
     const complete = bytes[48] === 1;
-    return { vTok, vSol, rTok, rSol, supply, complete, priceSol: vTok > 0 ? vSol / vTok : null };
+    const priceQuote = vTok > 0 ? vSol / vTok : null;
+    return {
+      vTok,
+      vSol,
+      rTok,
+      rSol,
+      supply,
+      complete,
+      priceQuote,
+      priceSol: isUsdQuote ? null : priceQuote,
+      priceUsd: isUsdQuote ? priceQuote : null,
+      isUsdQuote: Boolean(isUsdQuote)
+    };
   } catch {
     return null;
   }
@@ -134,7 +147,7 @@ export class LiveWatcher {
     const at = Date.now();
     if (meta.kind === 'curve') {
       const data = Array.isArray(value?.data) ? value.data[0] : null;
-      const c = data ? decodeCurve(data) : null;
+      const c = data ? decodeCurve(data, this.o.quoteDecimals, this.o.isUsdQuote) : null;
       if (c) this.o.onEvent?.({ type: 'curve', at, slot, ...c });
       return;
     }
