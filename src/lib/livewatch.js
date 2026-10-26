@@ -28,17 +28,22 @@ function readU64(bytes, off) {
   return Number(v);
 }
 
-/** pump.fun BondingCurve account: 8 disc | vTok u64 | vSol u64 | rTok u64 | rSol u64 | supply u64 | complete u8 */
-export function decodeCurve(b64) {
+/**
+ * pump.fun BondingCurve account: 8 disc | vTok u64 | vSol u64 | rTok u64 | rSol u64 | supply u64 | complete u8
+ * The quote reserves are in the curve's quote asset: SOL (9 decimals) or e.g. USDC (6) for USDC-quoted
+ * curves, so `priceSol` is the price per token in that asset.
+ */
+export function decodeCurve(b64, quoteDecimals = 9) {
   try {
     const bin = atob(b64);
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     if (bytes.length < 49) return null;
+    const unit = quoteDecimals === 9 ? LAMPORTS : 10 ** quoteDecimals;
     const vTok = readU64(bytes, 8) / 1e6;
-    const vSol = readU64(bytes, 16) / LAMPORTS;
+    const vSol = readU64(bytes, 16) / unit;
     const rTok = readU64(bytes, 24) / 1e6;
-    const rSol = readU64(bytes, 32) / LAMPORTS;
+    const rSol = readU64(bytes, 32) / unit;
     const supply = readU64(bytes, 40) / 1e6;
     const complete = bytes[48] === 1;
     return { vTok, vSol, rTok, rSol, supply, complete, priceSol: vTok > 0 ? vSol / vTok : null };
@@ -49,7 +54,7 @@ export function decodeCurve(b64) {
 
 export class LiveWatcher {
   /**
-   * @param opts { wsUrl, mint, tokenProgram, wallets:[{wallet, kind}], curve, onEvent(ev), onStatus(s), log }
+   * @param opts { wsUrl, mint, tokenProgram, wallets:[{wallet, kind}], curve, quoteDecimals, onEvent(ev), onStatus(s), log }
    */
   constructor(opts) {
     this.o = opts;
@@ -134,7 +139,7 @@ export class LiveWatcher {
     const at = Date.now();
     if (meta.kind === 'curve') {
       const data = Array.isArray(value?.data) ? value.data[0] : null;
-      const c = data ? decodeCurve(data) : null;
+      const c = data ? decodeCurve(data, this.o.quoteDecimals ?? 9) : null;
       if (c) this.o.onEvent?.({ type: 'curve', at, slot, ...c });
       return;
     }

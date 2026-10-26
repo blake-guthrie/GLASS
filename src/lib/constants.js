@@ -18,6 +18,9 @@ export const PROGRAMS = {
   WSOL: 'So11111111111111111111111111111111111111112',
 };
 
+// Stablecoin a pump.fun curve can be quoted in instead of SOL (see quote.js).
+export const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+
 // Labels for routers / trading bots that wrap pump.fun buys. Used for the "route" fingerprint.
 export const ROUTER_LABELS = {
   [PROGRAMS.PUMP]: 'pump.fun direct',

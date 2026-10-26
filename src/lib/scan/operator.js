@@ -5,6 +5,7 @@ import { pMap } from '../http.js';
 import { dexTokensBulk, priceHistory, solPriceUsd } from '../market.js';
 import { derivePumpAccounts } from './launch.js';
 import { PUMP_TOTAL_SUPPLY, PROGRAMS } from '../constants.js';
+import { mcapUsdFromQuote } from '../quote.js';
 
 const GRADUATION_MCAP = 69_000;
 
@@ -272,7 +273,6 @@ export async function analysePriorLaunches(rpc, launches, cluster, sigLists, { s
  * curve's recent trades). Lower bound on the real peak, but good enough to rank a serial launcher.
  */
 async function onchainOutcome(rpc, launch, exit, supply, solUsd) {
-  if (!solUsd) return null;
   try {
     const { bondingCurve } = await derivePumpAccounts(launch.mint);
     const sigs = (await rpc.getSignaturesForAddress(bondingCurve, { limit: 60 })) || [];
@@ -281,8 +281,9 @@ async function onchainOutcome(rpc, launch, exit, supply, solUsd) {
     const pick = [...ok.slice(0, 12), ...ok.slice(-12)];
     const uniq = [...new Map(pick.map((s) => [s.signature, s])).values()];
     const raws = await rpc.getTransactions(uniq.map((s) => s.signature));
-    let peakQuote = 0;
-    let lastQuote = null;
+    // Prices are per token in the curve's quote asset (SOL or USDC) → convert each to a USD mcap
+    let peakMcap = 0;
+    let lastMcap = null;
     let lastT = 0;
     let trades = 0;
     raws.forEach((raw, i) => {
@@ -291,16 +292,21 @@ async function onchainOutcome(rpc, launch, exit, supply, solUsd) {
       for (const e of rec.pumpEvents || []) {
         if (e.type !== 'trade' || e.mint !== launch.mint || !e.priceQuote) continue;
         trades++;
-        if (e.priceQuote > peakQuote) peakQuote = e.priceQuote;
+        const mcap = mcapUsdFromQuote(e.priceQuote, supply, e.quoteMint, solUsd);
+        if (!mcap) continue;
+        if (mcap > peakMcap) peakMcap = mcap;
         if ((rec.blockTime || 0) >= lastT) {
           lastT = rec.blockTime || 0;
-          lastQuote = e.priceQuote;
+          lastMcap = mcap;
         }
       }
     });
-    for (const s of exit?.sellsDetail || []) if (s.priceQuote > peakQuote) peakQuote = s.priceQuote;
-    if (!peakQuote) return null;
-    return { peakMcapUsd: peakQuote * supply * solUsd, nowMcapUsd: lastQuote ? lastQuote * supply * solUsd : null, trades };
+    for (const s of exit?.sellsDetail || []) {
+      const mcap = mcapUsdFromQuote(s.priceQuote, supply, s.quoteMint, solUsd);
+      if (mcap > peakMcap) peakMcap = mcap;
+    }
+    if (!peakMcap) return null;
+    return { peakMcapUsd: peakMcap, nowMcapUsd: lastMcap, trades };
   } catch {
     return null;
   }
@@ -336,7 +342,7 @@ export async function devExitOnLaunch(rpc, creator, launch, supply, solUsd, { to
       for (const e of rec.pumpEvents || []) {
         if (e.type !== 'trade' || e.mint !== launch.mint || e.user !== creator) continue;
         if (e.isBuy) bought += e.tokenAmount;
-        else sells.push({ t: rec.blockTime * 1000, tokens: e.tokenAmount, sol: e.quoteAmount, priceQuote: e.priceQuote, minutes: createdSec ? (rec.blockTime - createdSec) / 60 : null });
+        else sells.push({ t: rec.blockTime * 1000, tokens: e.tokenAmount, sol: e.quoteAmount, priceQuote: e.priceQuote, quoteMint: e.quoteMint, minutes: createdSec ? (rec.blockTime - createdSec) / 60 : null });
       }
       if (!(rec.pumpEvents || []).length) {
         const td = rec.tokenDeltas?.find((d) => d.mint === launch.mint && d.owner === creator && d.delta < 0);
@@ -347,12 +353,12 @@ export async function devExitOnLaunch(rpc, creator, launch, supply, solUsd, { to
     sells.sort((a, b) => a.t - b.t);
     const first = sells[0];
     const soldTokens = sells.reduce((a, x) => a + x.tokens, 0);
-    const mcapAt = first.priceQuote && solUsd ? first.priceQuote * supply * solUsd : null;
+    const mcapAt = mcapUsdFromQuote(first.priceQuote, supply, first.quoteMint, solUsd);
     const peakRef = launch.peakMcapUsd || null;
     return {
       sampledTxs: ordered.length,
       sells: sells.length,
-      sellsDetail: sells.slice(0, 20).map((x) => ({ t: x.t, priceQuote: x.priceQuote || null, minutes: x.minutes })),
+      sellsDetail: sells.slice(0, 20).map((x) => ({ t: x.t, priceQuote: x.priceQuote || null, quoteMint: x.quoteMint || null, minutes: x.minutes })),
       firstSellMin: first.minutes != null ? Math.round(first.minutes) : null,
       firstSellSec: first.minutes != null ? Math.round(first.minutes * 60) : null,
       soldPct: pct(soldTokens, supply),
@@ -396,7 +402,7 @@ export async function clusterExitOnLaunch(rpc, launch, cluster, sigLists, hist, 
       sampled++;
       const ev = (rec.pumpEvents || []).find((e) => e.type === 'trade' && e.mint === launch.mint && e.user === w && !e.isBuy);
       if (ev) {
-        sells.push({ wallet: w, t: rec.blockTime * 1000, tokens: ev.tokenAmount, sol: ev.quoteAmount, priceQuote: ev.priceQuote, minutes: (rec.blockTime - createdSec) / 60 });
+        sells.push({ wallet: w, t: rec.blockTime * 1000, tokens: ev.tokenAmount, sol: ev.quoteAmount, priceQuote: ev.priceQuote, quoteMint: ev.quoteMint, minutes: (rec.blockTime - createdSec) / 60 });
         return;
       }
       const td = rec.tokenDeltas.find((d) => d.mint === launch.mint && d.owner === w && d.delta < 0);
@@ -409,8 +415,8 @@ export async function clusterExitOnLaunch(rpc, launch, cluster, sigLists, hist, 
   const soldTokens = sells.reduce((s, x) => s + x.tokens, 0);
   // mcap at first sell: exact from the trade's post-trade price when we have it, else from candles
   let mcapAt = null;
-  if (first.priceQuote && solUsd) mcapAt = first.priceQuote * supply * solUsd;
-  else if (hist?.available) mcapAt = mcapAtTime(hist, first.t);
+  if (first.priceQuote) mcapAt = mcapUsdFromQuote(first.priceQuote, supply, first.quoteMint, solUsd);
+  if (mcapAt == null && hist?.available) mcapAt = mcapAtTime(hist, first.t);
   // Peak reference: candles when we have them, else the launch's known ATH (pump.fun record)
   const peakRef = hist?.available ? hist.peakMcapUsd : launch.peakMcapUsd || null;
   const peakAtRef = hist?.available ? hist.peakAt : launch.athAt || null;
@@ -419,7 +425,7 @@ export async function clusterExitOnLaunch(rpc, launch, cluster, sigLists, hist, 
   return {
     sampledTxs: sampled,
     sells: sells.length,
-    sellsDetail: sells.slice(0, 20).map((x) => ({ t: x.t, priceQuote: x.priceQuote || null, minutes: x.minutes })),
+    sellsDetail: sells.slice(0, 20).map((x) => ({ t: x.t, priceQuote: x.priceQuote || null, quoteMint: x.quoteMint || null, minutes: x.minutes })),
     firstSellMin: Math.round(first.minutes),
     soldPct: pct(soldTokens, supply),
     soldWithin10MinPct: pct(within10, supply),
