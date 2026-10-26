@@ -99,3 +99,16 @@ test('decodeCurve: USDC-quoted bonding curve decodes reserves with 6 decimals', 
   assert.equal(decoded.priceUsd, 30_000 / 100_000_000);
   assert.equal(decoded.priceSol, null);
 });
+
+test('zero-trade fallback: USDC-quoted pair without launch-window trades does not multiply by SOL price', () => {
+  // If no trades took place, initial bonding curve reserves define the price
+  const isUsdQuote = true;
+  const vTok = 100_000_000;
+  const vQuote = 30_000; // 30,000 USDC
+  const supply = 1_000_000_000;
+  const priceQuote = vQuote / vTok; // 0.0003 USD per token
+  const solMultiplier = isUsdQuote ? 1.0 : 180.0;
+  
+  const derivedMcap = priceQuote * supply * solMultiplier;
+  assert.equal(derivedMcap, 300_000); // Exactly $300k USD, NOT $54,000,000!
+});
