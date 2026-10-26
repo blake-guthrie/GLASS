@@ -85,6 +85,8 @@ export const PUMP_CURVE_SOL_TARGET = 85; // approx SOL to fill the bonding curve
 export const AVG_SLOT_MS = 400;
 
 export const DEFAULTS = {
+  sharedIndexEnabled: false,
+  sharedIndexUrl: '',
   // Solana's own public RPC answers HTTP 403 to browser extensions; publicnode accepts them.
   rpcUrl: 'https://solana-rpc.publicnode.com',
   slotWindow: 3, // slots after creation that count as "launch window"

@@ -46,6 +46,8 @@
     "https://bundles.jito.wtf/*"
   ],
   "optional_host_permissions": [
+    "http://localhost/*",
+    "http://127.0.0.1/*",
     "https://*/*"
   ],
   "content_scripts": [
