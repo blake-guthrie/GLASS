@@ -8,7 +8,9 @@
     "test": "node --test test/*.test.mjs",
     "scan": "node cli/scan.mjs",
     "icons": "node cli/make-icons.mjs",
-    "pack": "node cli/pack.mjs"
+    "pack": "node cli/pack.mjs",
+    "pack:firefox": "node cli/pack.mjs --firefox",
+    "pack:all": "node cli/pack.mjs --all"
   },
   "engines": {
     "node": ">=22"
