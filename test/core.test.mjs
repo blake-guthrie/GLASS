@@ -173,3 +173,29 @@ test('quoteToUsdMultiplier prices SOL quotes and rejects unknown quote assets', 
   assert.equal(quoteToUsdMultiplier('unknown', 250), null);
 });
 
+test('market cap calculation falls back to initial bonding curve with correct USDC quote when no trades exist', () => {
+  const createEv = { type: 'create', vSol: 30_000, vTok: 1_000_000_000 };
+  const createIx = { kind: 'create', quoteMint: PROGRAMS.USDC };
+  const creation = {
+    record: {
+      sig: 'create-tx',
+      pumpEvents: [createEv],
+      pumpIxs: [createIx],
+    },
+    bondingCurve: fx.bondingCurve,
+  };
+  const events = [];
+  const last = [...events].reverse().find((e) => e.priceQuote);
+  const foundCreateEv = creation.record?.pumpEvents?.find((e) => e.type === 'create');
+  const foundCreateIx = creation.record?.pumpIxs?.find((ix) => ix.quoteMint) || creation.record?.pumpIxs?.find((ix) => ix.kind === 'create');
+  const quoteMint = last?.quoteMint || foundCreateIx?.quoteMint || null;
+  const priceQuote = last?.priceQuote ?? (foundCreateEv?.vSol && foundCreateEv?.vTok ? foundCreateEv.vSol / foundCreateEv.vTok : null);
+  const sol = priceQuote && quoteMint !== PROGRAMS.USDC ? 250 : null;
+  const quoteUsd = quoteToUsdMultiplier(quoteMint, sol);
+  assert.equal(quoteMint, PROGRAMS.USDC);
+  assert.equal(sol, null);
+  assert.equal(quoteUsd, 1);
+  assert.equal(priceQuote * 1_000_000_000 * quoteUsd, 30_000);
+});
+
+

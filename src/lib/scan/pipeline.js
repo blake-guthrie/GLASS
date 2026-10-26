@@ -254,15 +254,17 @@ export async function runScan(rpc, identifier, opts = {}) {
     // the create event's initial virtual reserves when nobody has traded yet.
     if (report.market && report.market.marketCapUsd == null) {
       const last = [...events].reverse().find((e) => e.priceQuote);
-      const createEv = creation.record.pumpEvents?.find((e) => e.type === 'create');
+      const createEv = creation.record?.pumpEvents?.find((e) => e.type === 'create');
+      const createIx = creation.record?.pumpIxs?.find((ix) => ix.quoteMint) || creation.record?.pumpIxs?.find((ix) => ix.kind === 'create');
+      const quoteMint = last?.quoteMint || createIx?.quoteMint || null;
       const priceQuote = last?.priceQuote ?? (createEv?.vSol && createEv?.vTok ? createEv.vSol / createEv.vTok : null);
-      const sol = priceQuote && last?.quoteMint !== PROGRAMS.USDC ? await solPriceUsd() : null;
-      const quoteUsd = quoteToUsdMultiplier(last?.quoteMint, sol);
+      const sol = priceQuote && quoteMint !== PROGRAMS.USDC ? await solPriceUsd() : null;
+      const quoteUsd = quoteToUsdMultiplier(quoteMint, sol);
       if (priceQuote && quoteUsd) {
         report.market.marketCapUsd = priceQuote * report.supply * quoteUsd;
         report.market.priceUsd = priceQuote * quoteUsd;
         report.market.mcapSource = last ? 'last launch-window trade' : 'initial bonding-curve price (no trades yet)';
-        report.market.quoteSymbol = last?.quoteSymbol || 'SOL';
+        report.market.quoteSymbol = last?.quoteSymbol || (quoteMint === PROGRAMS.USDC ? 'USDC' : 'SOL');
         if (!report.market.dexId) report.market.dexId = 'pumpfun';
       }
     }
