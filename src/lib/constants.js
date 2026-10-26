@@ -15,6 +15,7 @@ export const PROGRAMS = {
   RAYDIUM_AMM: '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp4',
   RAYDIUM_CPMM: 'CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C',
   METEORA_DLMM: 'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo',
+  METEORA_DAMM_V2: 'cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG',
   WSOL: 'So11111111111111111111111111111111111111112',
 };
 
@@ -26,6 +27,7 @@ export const ROUTER_LABELS = {
   [PROGRAMS.RAYDIUM_AMM]: 'Raydium',
   [PROGRAMS.RAYDIUM_CPMM]: 'Raydium CPMM',
   [PROGRAMS.METEORA_DLMM]: 'Meteora',
+  [PROGRAMS.METEORA_DAMM_V2]: 'Meteora DAMM v2',
   'BSfD6SHZigAfDWSjzD5Q41jw8LmKwtmjskPH9XW1mrRW': 'Photon',
   // Add more router/bot program IDs in src/data/known.json → "programs". Unknown routers are
   // still fingerprinted by address, they just display truncated.

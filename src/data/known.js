@@ -20,6 +20,8 @@ export default {
   },
   programs: {
     'BSfD6SHZigAfDWSjzD5Q41jw8LmKwtmjskPH9XW1mrRW': 'Photon',
+    // Meteora DAMM v2 (Source: https://github.com/MeteoraAg/damm-v2#deployments)
+    'cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG': 'Meteora DAMM v2',
   },
   // Fee / tip wallets of launch tools (Proxima, Sumo, Fortune, Rapid Launch, ...). GLASS discovers shared
   // non-protocol fee recipients per launch automatically; add confirmed ones here to label them by name.
