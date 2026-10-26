@@ -1,5 +1,5 @@
 // Orchestrates the stages and streams partial reports so the panel fills in progressively.
-import { DEFAULTS, PUMP_TOTAL_SUPPLY } from '../constants.js';
+import { DEFAULTS, PUMP_TOTAL_SUPPLY, PROGRAMS } from '../constants.js';
 import { resolveMint } from './resolve.js';
 import { findCreation, collectLaunchTxs, extractLaunchEvents } from './launch.js';
 import { analyseLaunch, enrichWithJito, applyWalletKinds, toolPatternReasons } from './fingerprint.js';
@@ -9,7 +9,7 @@ import { trackCluster } from './live.js';
 import { discoverPriorLaunches, analysePriorLaunches, rateOperator, devExitOnLaunch, clusterExitOnLaunch, profileSummary } from './operator.js';
 import { creatorProfile, toPriorLaunches, fetchCoin } from './devprofile.js';
 import { computeScore } from './score.js';
-import { dexTokenInfo, jitoBundleId, solPriceUsd } from '../market.js';
+import { dexTokenInfo, jitoBundleId, quoteToUsdMultiplier, solPriceUsd } from '../market.js';
 import { pMap } from '../http.js';
 import known from '../../data/known.js';
 
@@ -254,13 +254,17 @@ export async function runScan(rpc, identifier, opts = {}) {
     // the create event's initial virtual reserves when nobody has traded yet.
     if (report.market && report.market.marketCapUsd == null) {
       const last = [...events].reverse().find((e) => e.priceQuote);
-      const createEv = creation.record.pumpEvents?.find((e) => e.type === 'create');
+      const createEv = creation.record?.pumpEvents?.find((e) => e.type === 'create');
+      const createIx = creation.record?.pumpIxs?.find((ix) => ix.quoteMint) || creation.record?.pumpIxs?.find((ix) => ix.kind === 'create');
+      const quoteMint = last?.quoteMint || createIx?.quoteMint || null;
       const priceQuote = last?.priceQuote ?? (createEv?.vSol && createEv?.vTok ? createEv.vSol / createEv.vTok : null);
-      const sol = priceQuote ? await solPriceUsd() : null;
-      if (priceQuote && sol) {
-        report.market.marketCapUsd = priceQuote * report.supply * sol;
-        report.market.priceUsd = priceQuote * sol;
+      const sol = priceQuote && quoteMint !== PROGRAMS.USDC ? await solPriceUsd() : null;
+      const quoteUsd = quoteToUsdMultiplier(quoteMint, sol);
+      if (priceQuote && quoteUsd) {
+        report.market.marketCapUsd = priceQuote * report.supply * quoteUsd;
+        report.market.priceUsd = priceQuote * quoteUsd;
         report.market.mcapSource = last ? 'last launch-window trade' : 'initial bonding-curve price (no trades yet)';
+        report.market.quoteSymbol = last?.quoteSymbol || (quoteMint === PROGRAMS.USDC ? 'USDC' : 'SOL');
         if (!report.market.dexId) report.market.dexId = 'pumpfun';
       }
     }
