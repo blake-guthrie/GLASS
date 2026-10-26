@@ -17,6 +17,8 @@ export default {
     'ASTyfSima4LLAdDgoFGkgqoKowG1LZFDr9fAQrg7iaJZ': 'MEXC',
     'AobVSwdW9BbpMdJvTqeCN4hPAmh4rHm7vwLnQ5ATSyrS': 'Crypto.com',
     '88xTWZMeKfiTgbfEmPLdsUCQcZinwUfk25EBQZ21XMAZ': 'HTX',
+    // Bitfinex Solana hot wallet (Source: https://github.com/bitfinexcom/pub/blob/83d06bdb5f5a2ce05d5ba2db5a426dd44c9f5128/wallets.txt)
+    'FxteHmLwG9nk1eL4pjNve3Eub2goGkkz6g6TbvdmW46a': 'Bitfinex',
   },
   programs: {
     'BSfD6SHZigAfDWSjzD5Q41jw8LmKwtmjskPH9XW1mrRW': 'Photon',
