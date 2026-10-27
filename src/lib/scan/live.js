@@ -8,6 +8,7 @@
 import { parseTx, classifyForMint } from '../txparse.js';
 import { pMap } from '../http.js';
 import { PROGRAMS } from '../constants.js';
+import { sumQuotes } from '../quotes.js';
 
 /**
  * @param cluster  [{wallet, tokens, kind}] the operator cluster (creator + bundle-like launch wallets)
@@ -45,10 +46,7 @@ export async function trackCluster(rpc, mint, cluster, { launchTimeSec, supply, 
         if (!rec || rec.err) return;
         const c = classifyForMint(rec, mint, wallet);
         if (!c.side) return;
-        const ev = { wallet, sig: rec.sig, slot: rec.slot, t: rec.blockTime ? rec.blockTime * 1000 : null, side: c.side, tokens: c.tokens, sol: c.sol };
-        // price at the time, from the program's own trade event when present
-        const te = (rec.pumpEvents || []).find((e) => e.type === 'trade' && e.mint === mint);
-        if (te?.priceQuote) ev.priceQuote = te.priceQuote;
+        const ev = { wallet, sig: rec.sig, slot: rec.slot, t: rec.blockTime ? rec.blockTime * 1000 : null, side: c.side, tokens: c.tokens, sol: c.sol, quotes: sumQuotes([c]), quoteMint: c.quoteMint ?? null, quoteAmount: c.quoteAmount ?? null, priceQuote: c.priceQuote ?? null };
         if (c.side === 'transfer_out') {
           const tr = rec.splTransfers.find((x) => x.mint === mint && x.fromOwner === wallet);
           ev.to = tr?.toOwner || null;
@@ -84,7 +82,7 @@ export async function trackCluster(rpc, mint, cluster, { launchTimeSec, supply, 
       sol += sells[j].sol;
       j++;
     }
-    if (ws.size >= 2) exitEvents.push({ at: sells[i].t, wallets: ws.size, tokens, sol, pct: supply ? (tokens / supply) * 100 : null, minutesAfterLaunch: Math.round((sells[i].t / 1000 - launchTimeSec) / 60) });
+    if (ws.size >= 2) exitEvents.push({ at: sells[i].t, wallets: ws.size, tokens, sol, quotes: sumQuotes(sells.slice(i, j)), pct: supply ? (tokens / supply) * 100 : null, minutesAfterLaunch: Math.round((sells[i].t / 1000 - launchTimeSec) / 60) });
     i = j;
   }
 
@@ -125,6 +123,7 @@ export async function trackCluster(rpc, mint, cluster, { launchTimeSec, supply, 
       clusterSoldPct: supply ? (soldTokens / supply) * 100 : null,
       clusterSoldShare: totalBought ? Math.min(1, soldTokens / totalBought) : null,
       clusterSoldSol: soldSol,
+      clusterSoldQuotes: sumQuotes(sells),
       sellsSeen: sells.length,
       firstClusterSellMin: firstSell ? Math.round((firstSell.t / 1000 - launchTimeSec) / 60) : null,
       firstClusterSellAt: firstSell ? firstSell.t : null,

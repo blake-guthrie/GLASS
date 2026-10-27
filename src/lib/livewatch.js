@@ -2,7 +2,7 @@
 // account for the mint (balance changes = buys / sells / transfers, sub-second) and on the pump.fun
 // bonding curve (live price / market cap from its virtual reserves). No polling, no page scraping.
 import { PROGRAMS } from './constants.js';
-import { decodeBase58 } from './base58.js';
+import { decodeBase58, encodeBase58 } from './base58.js';
 import { findProgramAddress } from './pda.js';
 
 const LAMPORTS = 1e9;
@@ -28,20 +28,29 @@ function readU64(bytes, off) {
   return Number(v);
 }
 
-/** pump.fun BondingCurve account: 8 disc | vTok u64 | vSol u64 | rTok u64 | rSol u64 | supply u64 | complete u8 */
+/** Pump BondingCurve: quote_mint follows reserves, complete, creator and two flags (IDL offset 83). */
 export function decodeCurve(b64) {
   try {
     const bin = atob(b64);
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     if (bytes.length < 49) return null;
+    // Historical accounts end before the quote extension. A default mint denotes native SOL.
+    if (bytes.length > 83 && bytes.length < 115) return null;
+    const mintBytes = bytes.length >= 115 ? bytes.subarray(83, 115) : null;
+    const quoteMint = !mintBytes || mintBytes.every(b => b === 0) ? PROGRAMS.WSOL : encodeBase58(mintBytes);
+    const quoteSymbol = quoteMint === PROGRAMS.USDC ? 'USDC' : quoteMint === PROGRAMS.WSOL ? 'SOL' : null;
+    const scale = quoteSymbol === 'USDC' ? 1e6 : quoteSymbol === 'SOL' ? LAMPORTS : null;
     const vTok = readU64(bytes, 8) / 1e6;
-    const vSol = readU64(bytes, 16) / LAMPORTS;
+    const vQuote = scale ? readU64(bytes, 16) / scale : null;
+    const vSol = quoteSymbol === 'SOL' ? vQuote : null;
     const rTok = readU64(bytes, 24) / 1e6;
-    const rSol = readU64(bytes, 32) / LAMPORTS;
+    const rQuote = scale ? readU64(bytes, 32) / scale : null;
+    const rSol = quoteSymbol === 'SOL' ? rQuote : null;
     const supply = readU64(bytes, 40) / 1e6;
     const complete = bytes[48] === 1;
-    return { vTok, vSol, rTok, rSol, supply, complete, priceSol: vTok > 0 ? vSol / vTok : null };
+    const priceQuote = vTok > 0 && vQuote != null ? vQuote / vTok : null;
+    return { vTok, vSol, rTok, rSol, vQuote, rQuote, quoteMint, quoteSymbol, supply, complete, priceQuote, priceSol: quoteSymbol === 'SOL' ? priceQuote : null };
   } catch {
     return null;
   }

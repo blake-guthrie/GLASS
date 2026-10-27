@@ -42,22 +42,52 @@ export function decodePumpEvent(ix) {
   try {
     if (name === 'TradeEvent') {
       const mint = pk();
-      const quoteAmount = Number(u64()) / LAMPORTS_PER_SOL;
-      const tokenAmount = Number(u64()) / 1e6;
+      const quoteAmountRaw = Number(u64());
+      const tokenAmountRaw = Number(u64());
+      const quoteAmount = quoteAmountRaw / LAMPORTS_PER_SOL;
+      const tokenAmount = tokenAmountRaw / 1e6;
       const isBuy = d[o++] === 1;
       const user = pk();
       const timestamp = Number(u64());
-      const vSol = Number(u64()) / LAMPORTS_PER_SOL;
-      const vTok = Number(u64()) / 1e6;
-      const rSol = Number(u64()) / LAMPORTS_PER_SOL;
-      const rTok = Number(u64()) / 1e6;
+      const virtualQuoteReservesRaw = Number(u64());
+      const virtualTokenReservesRaw = Number(u64());
+      const realQuoteReservesRaw = Number(u64());
+      const realTokenReservesRaw = Number(u64());
+      const vSol = virtualQuoteReservesRaw / LAMPORTS_PER_SOL;
+      const vTok = virtualTokenReservesRaw / 1e6;
+      const rSol = realQuoteReservesRaw / LAMPORTS_PER_SOL;
+      const rTok = realTokenReservesRaw / 1e6;
       const feeRecipient = pk();
       o += 8; // fee_basis_points
       const fee = Number(u64()) / LAMPORTS_PER_SOL;
       const creator = pk();
       o += 8; // creator_fee_basis_points
       const creatorFee = Number(u64()) / LAMPORTS_PER_SOL;
-      return { type: 'trade', mint, quoteAmount, tokenAmount, isBuy, user, timestamp, vSol, vTok, rSol, rTok, feeRecipient, fee, creator, creatorFee, priceQuote: vTok > 0 ? vSol / vTok : null };
+      return {
+        type: 'trade',
+        mint,
+        quoteAmount,
+        tokenAmount,
+        quoteAmountRaw,
+        tokenAmountRaw,
+        virtualQuoteReservesRaw,
+        virtualTokenReservesRaw,
+        realQuoteReservesRaw,
+        realTokenReservesRaw,
+        isBuy,
+        user,
+        timestamp,
+        vSol,
+        vTok,
+        rSol,
+        rTok,
+        feeRecipient,
+        fee,
+        creator,
+        creatorFee,
+        priceQuote: vTok > 0 ? vSol / vTok : null,
+        ...readQuoteExtension(d, o, 'trade'),
+      };
     }
     if (name === 'CreateEvent') {
       const tokenName = str();
@@ -72,7 +102,7 @@ export function decodePumpEvent(ix) {
       const vSol = Number(u64()) / LAMPORTS_PER_SOL;
       const rTok = Number(u64()) / 1e6;
       const supply = Number(u64()) / 1e6;
-      return { type: 'create', tokenName, symbol, uri, mint, bondingCurve, user, creator, timestamp, vTok, vSol, rTok, supply };
+      return { type: 'create', tokenName, symbol, uri, mint, bondingCurve, user, creator, timestamp, vTok, vSol, rTok, supply, ...readQuoteExtension(d, o, 'create') };
     }
     if (name === 'CompleteEvent') {
       const user = pk();
@@ -131,9 +161,9 @@ export function decodePumpIx(ix, signers = []) {
       if (modern) {
         out.mint = accounts[1];
         out.quoteMint = accounts[2];
-        out.user = firstSigner || accounts[8] || null;
+        out.user = accounts[/_v3$/.test(name) ? 8 : 13] || null;
         out.feeRecipient = null; // read from TradeEvent instead
-        out.bondingCurve = accounts[5] && accounts[5] !== out.user ? accounts[5] : null;
+        out.bondingCurve = accounts[/_v3$/.test(name) ? 5 : 10] || null;
       } else {
         out.mint = accounts[2];
         out.user = accounts[6] || firstSigner;
@@ -150,7 +180,7 @@ export function decodePumpIx(ix, signers = []) {
       [s, off] = readString(data, off);
       out.uri = s;
       out.mint = accounts[0];
-      out.user = firstSigner || accounts[7] || accounts[5] || null;
+      out.user = accounts[name === 'create_v2' ? 5 : 7] || null;
     }
   } catch {
     /* partial decode is fine */
@@ -310,6 +340,11 @@ export function parseTx(tx, signatureHint) {
 
   const entryProgram = programs.find((p) => ![PROGRAMS.SYSTEM, PROGRAMS.ATA, PROGRAMS.TOKEN, PROGRAMS.TOKEN_2022].includes(p)) || programs[0] || null;
 
+  // Every consumer (launch, wallet history and live activity) needs the same units.
+  for (const event of pumpEvents) {
+    if (event.type === 'trade') Object.assign(event, tradeQuote(event, pumpIxs));
+  }
+
   return {
     sig,
     slot: tx.slot,
@@ -368,12 +403,76 @@ export function txInitialisesMint(tx, mint) {
  */
 export function classifyForMint(rec, mint, wallet) {
   const ev = rec.pumpEvents?.find((e) => e.type === 'trade' && e.mint === mint && e.user === wallet);
-  if (ev) return { side: ev.isBuy ? 'buy' : 'sell', tokens: ev.tokenAmount, sol: ev.quoteAmount, priceQuote: ev.priceQuote, fromEvent: true };
+  if (ev) return { side: ev.isBuy ? 'buy' : 'sell', tokens: ev.tokenAmount, sol: ev.quoteMint === PROGRAMS.WSOL ? ev.quoteAmount : null, quoteAmount: ev.quoteAmount, quoteMint: ev.quoteMint, priceQuote: ev.priceQuote, fromEvent: true };
   const td = rec.tokenDeltas.find((d) => d.owner === wallet && d.mint === mint);
   if (!td) return { side: null, tokens: 0, sol: 0 };
   const solChange = (rec.solDelta[wallet] || 0) / LAMPORTS_PER_SOL;
   const isSwap = rec.pumpIxs.some((p) => p.kind === 'buy' || p.kind === 'sell') || rec.programs.some((p) => p === PROGRAMS.PUMPSWAP || p === PROGRAMS.JUPITER_V6 || p === PROGRAMS.RAYDIUM_AMM || p === PROGRAMS.RAYDIUM_CPMM || p === PROGRAMS.METEORA_DLMM);
   const plainTransfer = rec.splTransfers.some((t) => t.mint === mint && !t.via && (t.fromOwner === wallet || t.toOwner === wallet));
-  if (td.delta > 0) return { side: isSwap && !plainTransfer ? 'buy' : plainTransfer && !isSwap ? 'transfer_in' : 'buy', tokens: td.delta, sol: -solChange };
-  return { side: isSwap && !plainTransfer ? 'sell' : plainTransfer && !isSwap ? 'transfer_out' : 'sell', tokens: -td.delta, sol: solChange };
+  const side = td.delta > 0 ? (plainTransfer && !isSwap ? 'transfer_in' : 'buy') : (plainTransfer && !isSwap ? 'transfer_out' : 'sell');
+  const quote = balanceQuote(rec, mint, wallet, side);
+  return {
+    side, tokens: Math.abs(td.delta),
+    sol: quote.matched && quote.quoteMint !== PROGRAMS.WSOL ? null : td.delta > 0 ? -solChange : solChange,
+    quoteMint: quote.quoteMint, quoteAmount: quote.quoteAmount,
+  };
+}
+
+/** Quote balance changes are approximate fallback amounts, never reserve prices. */
+export function balanceQuote(rec, mint, wallet, side) {
+  const matches = rec.pumpIxs.filter(ix => ix.kind === side && ix.mint === mint && ix.user === wallet);
+  const mints = new Set(matches.map(ix => ix.quoteMint || PROGRAMS.WSOL));
+  const quoteMint = mints.size === 1 ? [...mints][0] : null;
+  let delta = null;
+  if (quoteMint === PROGRAMS.USDC) delta = rec.tokenDeltas.find(d => d.owner === wallet && d.mint === quoteMint)?.delta ?? null;
+  if (quoteMint === PROGRAMS.WSOL) delta = (rec.solDelta[wallet] || 0) / LAMPORTS_PER_SOL;
+  const amount = delta == null ? null : side === 'buy' ? -delta : delta;
+  return { quoteMint, quoteAmount: amount != null && amount > 0 ? amount : null, matched: matches.length > 0 };
+}
+
+/** Resolve one trade's quote without borrowing another mint's or trader's instruction. */
+export function tradeQuote(event, instructions = []) {
+  const matches = instructions.filter(ix => ix.kind === (event.isBuy ? 'buy' : 'sell') && ix.mint === event.mint && ix.user === event.user);
+  const mints = new Set(matches.map(ix => ix.quoteMint || PROGRAMS.WSOL));
+  const quoteMint = event.quoteFieldsInvalid ? null : event.quoteMint || (mints.size === 1 ? [...mints][0] : null);
+  const scale = quoteMint === PROGRAMS.USDC ? 1e6 : quoteMint === PROGRAMS.WSOL ? LAMPORTS_PER_SOL : null;
+  const quoteAmount = scale == null ? null : event.quoteAmountRaw != null ? Number(event.quoteAmountRaw) / scale : event.quoteAmount;
+  const virtualQuote = scale == null ? null : event.virtualQuoteReservesRaw != null ? Number(event.virtualQuoteReservesRaw) / scale : event.vSol;
+  const virtualTokens = event.virtualTokenReservesRaw != null ? Number(event.virtualTokenReservesRaw) / 1e6 : event.vTok;
+  return { quoteMint, quoteAmount, priceQuote: virtualQuote != null && virtualTokens > 0 ? virtualQuote / virtualTokens : null };
+}
+
+// Quote fields appended in the pinned public Pump IDL. Short historical events
+// retain their original fields; a complete quote extension is authoritative.
+function readQuoteExtension(bytes, offset, kind) {
+  let o = offset;
+  const take = n => { if (n < 0 || o + n > bytes.length) throw new RangeError('short event'); const p = o; o += n; return p; };
+  const number = () => Number(readU64LE(bytes, take(8)));
+  try {
+    if (o === bytes.length) return {}; // Historical event without extension.
+    if (kind === 'trade') {
+      take(1 + 4 * 8); // volume flag and volume counters/timestamp
+      if (o === bytes.length) return {}; // Complete historical prefix.
+      const nameSize = readU32LE(bytes, take(4));
+      take(nameSize);
+      if (o === bytes.length) return {}; // Complete historical prefix.
+      take(1 + 4 * 8); // mayhem, cashback and buyback fields
+      if (o === bytes.length) return {}; // Complete historical prefix.
+      const count = readU32LE(bytes, take(4));
+      take(count * 34); // Shareholder { pubkey, u16 }
+      if (o === bytes.length) return {}; // Complete historical prefix.
+    } else {
+      take(32 + 2); // token program, mayhem and cashback flags
+      if (o === bytes.length) return {}; // Complete historical prefix.
+    }
+    const p = take(32);
+    const rawMint = encodeBase58(bytes.subarray(p, p + 32));
+    const quoteMint = rawMint === PROGRAMS.SYSTEM ? PROGRAMS.WSOL : rawMint;
+    const quoteAmountRaw = kind === 'trade' ? number() : undefined;
+    const virtualQuoteReservesRaw = number();
+    const realQuoteReservesRaw = kind === 'trade' ? number() : undefined;
+    return { quoteMint, virtualQuoteReservesRaw, ...(kind === 'trade' ? { quoteAmountRaw, realQuoteReservesRaw } : {}) };
+  } catch {
+    return { quoteFieldsInvalid: true };
+  }
 }

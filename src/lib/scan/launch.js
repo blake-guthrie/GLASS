@@ -3,7 +3,7 @@
 import { PROGRAMS, AVG_SLOT_MS, LAMPORTS_PER_SOL } from '../constants.js';
 import { findProgramAddress, isOnCurve } from '../pda.js';
 import { decodeBase58 } from '../base58.js';
-import { parseTx, txInitialisesMint } from '../txparse.js';
+import { parseTx, txInitialisesMint, tradeQuote, balanceQuote } from '../txparse.js';
 
 export async function derivePumpAccounts(mint) {
   const mintBytes = decodeBase58(mint);
@@ -285,16 +285,22 @@ export function extractLaunchEvents(records, mint, creation) {
     const trades = (rec.pumpEvents || []).filter((e) => e.type === 'trade' && e.mint === mint);
     if (trades.length) {
       for (const t of trades) {
-        const pumpIx = rec.pumpIxs.find((p) => p.user === t.user) || rec.pumpIxs[0] || null;
+        const matches = rec.pumpIxs.filter((p) => p.kind === (t.isBuy ? 'buy' : 'sell') && p.mint === mint && p.user === t.user);
+        const pumpIx = matches.length === 1 ? matches[0] : null;
+        const { quoteMint, quoteAmount, priceQuote } = tradeQuote(t, rec.pumpIxs);
+        const tokenAmount = t.tokenAmountRaw != null ? Number(t.tokenAmountRaw) / 1e6 : t.tokenAmount;
         events.push({
           ...base,
           wallet: t.user,
           side: t.isBuy ? 'buy' : 'sell',
-          tokens: t.tokenAmount,
-          sol: t.quoteAmount,
-          priceQuote: t.priceQuote,
+          tokens: tokenAmount,
+          sol: quoteMint === PROGRAMS.WSOL ? quoteAmount : null,
+          quoteAmount,
+          quoteMint,
+          quoteSymbol: quoteMint === PROGRAMS.USDC ? 'USDC' : quoteMint === PROGRAMS.WSOL ? 'SOL' : null,
+          priceQuote,
           isCreator: t.user === creator,
-          slippageLimitSol: pumpIx?.solLimit ?? (pumpIx?.solIn ? pumpIx.solIn : null),
+          slippageLimitSol: quoteMint === PROGRAMS.WSOL ? pumpIx?.solLimit ?? pumpIx?.solIn ?? null : null,
           pumpIxName: pumpIx?.name || null,
           fromEvent: true,
         });
@@ -315,16 +321,22 @@ export function extractLaunchEvents(records, mint, creation) {
       // (minus fees is close enough; WSOL-wrapped routes show up as the wallet's lamport delta too).
       const ownDelta = Math.abs((rec.solDelta[d.owner] || 0) / LAMPORTS_PER_SOL);
       const solShare = isBuy && curveDelta > 0 ? (curveDelta * d.delta) / totalBuyTokens : curveDelta < 0 && !isBuy ? -curveDelta : ownDelta;
-      const pumpIx = rec.pumpIxs.find((p) => p.user === d.owner) || rec.pumpIxs[0] || null;
+      const side = isBuy ? 'buy' : 'sell';
+      const quote = balanceQuote(rec, mint, d.owner, side);
+      const matches = rec.pumpIxs.filter(p => p.kind === side && p.mint === mint && p.user === d.owner);
+      const pumpIx = matches.length === 1 ? matches[0] : null;
       events.push({
         ...base,
         wallet: d.owner,
         side: isBuy ? 'buy' : 'sell',
         tokens: Math.abs(d.delta),
-        sol: solShare,
+        sol: quote.matched && quote.quoteMint !== PROGRAMS.WSOL ? null : solShare,
+        quoteMint: quote.quoteMint,
+        quoteAmount: quote.quoteMint === PROGRAMS.WSOL ? solShare : quote.quoteAmount,
+        quoteSymbol: quote.quoteMint === PROGRAMS.USDC ? 'USDC' : quote.quoteMint === PROGRAMS.WSOL ? 'SOL' : null,
         priceQuote: null,
         isCreator: d.owner === creator,
-        slippageLimitSol: pumpIx?.solLimit ?? null,
+        slippageLimitSol: quote.quoteMint === PROGRAMS.WSOL ? pumpIx?.solLimit ?? null : null,
         pumpIxName: pumpIx?.name || null,
         fromEvent: false,
       });

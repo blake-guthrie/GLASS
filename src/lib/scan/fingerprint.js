@@ -2,6 +2,7 @@
 // moved as one (same Jito bundle, same fee recipient, same settings).
 import { ROUTER_LABELS, PUMP_TOTAL_SUPPLY, LAMPORTS_PER_SOL } from '../constants.js';
 import { pMap } from '../http.js';
+import { sumQuotes } from '../quotes.js';
 
 const sig2 = (n) => (n == null ? 'na' : Number(n.toPrecision(2)));
 const slipBucket = (ev) => (ev.slippageLimitSol && ev.sol > 0 ? Math.round((ev.slippageLimitSol / ev.sol - 1) * 20) / 20 : 'na');
@@ -41,6 +42,8 @@ export function analyseLaunch(events, { supply = PUMP_TOTAL_SUPPLY, slotWindow =
         tokens: 0,
         sol: 0,
         solOut: 0,
+        quotes: sumQuotes([]),
+        quotesOut: sumQuotes([]),
         txs: [],
         payers: new Set(),
         tip: e.jitoTip,
@@ -58,10 +61,12 @@ export function analyseLaunch(events, { supply = PUMP_TOTAL_SUPPLY, slotWindow =
     }
     if (e.side === 'buy') {
       b.bought += e.tokens;
-      b.sol += e.sol;
+      b.sol += e.sol || 0;
+      b.quotes = sumQuotes([{ quotes: b.quotes }, e]);
     } else {
       b.sold += e.tokens;
-      b.solOut += e.sol;
+      b.solOut += e.sol || 0;
+      b.quotesOut = sumQuotes([{ quotes: b.quotesOut }, e]);
     }
     b.txs.push(e.sig);
     if (e.payer && e.payer !== e.wallet) b.payers.add(e.payer);
@@ -123,9 +128,9 @@ export function analyseLaunch(events, { supply = PUMP_TOTAL_SUPPLY, slotWindow =
 
   return {
     supply,
-    creatorDevBuy: { tokens: devBuyTokens, sol: devBuySol, pct: (devBuyTokens / supply) * 100, txs: creatorEv.map((e) => e.sig) },
-    slot0: { count: slot0.length, tokens: sum(slot0, 'tokens'), sol: sum(slot0, 'sol'), pct: (sum(slot0, 'tokens') / supply) * 100, grossPct: (sum(slot0, 'bought') / supply) * 100 },
-    window: { count: windowB.length, tokens: sum(windowB, 'tokens'), sol: sum(windowB, 'sol'), pct: (sum(windowB, 'tokens') / supply) * 100, grossPct: (sum(windowB, 'bought') / supply) * 100, flipped: flippedCount, slotWindow },
+    creatorDevBuy: { tokens: devBuyTokens, sol: devBuySol, quotes: sumQuotes(creatorEv), pct: (devBuyTokens / supply) * 100, txs: creatorEv.map((e) => e.sig) },
+    slot0: { count: slot0.length, tokens: sum(slot0, 'tokens'), sol: sum(slot0, 'sol'), quotes: sumQuotes(slot0), pct: (sum(slot0, 'tokens') / supply) * 100, grossPct: (sum(slot0, 'bought') / supply) * 100 },
+    window: { count: windowB.length, tokens: sum(windowB, 'tokens'), sol: sum(windowB, 'sol'), quotes: sumQuotes(windowB), pct: (sum(windowB, 'tokens') / supply) * 100, grossPct: (sum(windowB, 'bought') / supply) * 100, flipped: flippedCount, slotWindow },
     early: { count: buyers.length, tokens: sum(buyers, 'tokens'), pct: (sum(buyers, 'tokens') / supply) * 100, seconds: earlyWindowSec },
     sharedPayers,
     buyers,
@@ -223,7 +228,7 @@ export function applyWalletKinds(analysis, profiles) {
     b.kind = k;
     buckets[k].push(b);
   }
-  const agg = (arr) => ({ count: arr.length, tokens: arr.reduce((s, x) => s + x.tokens, 0), sol: arr.reduce((s, x) => s + x.sol, 0), pct: (arr.reduce((s, x) => s + x.tokens, 0) / analysis.supply) * 100, wallets: arr.map((x) => x.wallet) });
+  const agg = (arr) => ({ count: arr.length, tokens: arr.reduce((s, x) => s + x.tokens, 0), sol: arr.reduce((s, x) => s + x.sol, 0), quotes: sumQuotes(arr), pct: (arr.reduce((s, x) => s + x.tokens, 0) / analysis.supply) * 100, wallets: arr.map((x) => x.wallet) });
   analysis.bundle = agg([...buckets.bundle, ...buckets.unclassified]);
   analysis.snipers = agg(buckets.sniper);
   analysis.organic = agg(buckets.organic);

@@ -26,6 +26,15 @@
   };
   const fmtPct = (v) => (v == null || !isFinite(v) ? '—' : `${v.toFixed(v < 10 ? 1 : 0)}%`);
   const fmtSol = (v) => (v == null ? '—' : `${v.toFixed(v < 1 ? 3 : 2)}◎`);
+  const fmtQuotes = (q, legacySol) => {
+    if (!q) return fmtSol(legacySol);
+    const parts = [];
+    if (q.sol) parts.push(fmtSol(q.sol));
+    if (q.usdc) parts.push(`${q.usdc.toFixed(q.usdc < 1 ? 3 : 2)} USDC`);
+    if (q.unknown) parts.push(parts.length ? 'unknown amount' : '—');
+    return parts.length ? parts.join(' + ') : '0';
+  };
+  const fmtSpend = (row) => fmtQuotes(row.quotes, row.sol);
   const fmtMin = (m) => (m == null ? '—' : m < 1 ? `${Math.round(m * 60)}s` : m < 60 ? `${Math.round(m)}m` : m < 1440 ? `${(m / 60).toFixed(1)}h` : `${(m / 1440).toFixed(1)}d`);
   const short = (a) => (a ? `${a.slice(0, 4)}…${a.slice(-4)}` : '—');
   const ago = (ms) => {
@@ -320,10 +329,10 @@ tr.how td { border-bottom: 1px solid #171b25; }
           <span><b class="${cls ? 'c-bundle' : 'c-un'}"></b>${cls ? `bundle ${fmtPct(bundle)} (${L.bundle.count})` : `launch window ${fmtPct(bundle)} (${L.window.count})`}</span>
           ${cls ? `<span><b class="c-sniper"></b>snipers ${fmtPct(sniper)} (${L.snipers.count})</span><span><b class="c-organic"></b>organic ${fmtPct(organic)} (${L.organic.count})</span>` : ''}</div>`;
       const kv = `<div class="kv">
-        <span class="k" title="Wallets (other than the dev) that bought in the very same block the token was created — only possible if the buy was prepared before the token existed">Creation slot</span><span class="v">${L.slot0.count} wallets · ${fmtPct(L.slot0.pct)} of supply · ${fmtSol(L.slot0.sol)} spent</span>
-        <span class="k" title="Buyers in the creation slot plus the next ${L.window.slotWindow} slots (~${(((L.window.slotWindow + 1) * (r.slotMs || 400)) / 1000).toFixed(1)} s). This is the 'launch window' everything else is based on">Slots 0–${L.window.slotWindow}</span><span class="v">${L.window.count} wallets · ${fmtPct(L.window.pct)} of supply · ${fmtSol(L.window.sol)} spent</span>
+        <span class="k" title="Wallets (other than the dev) that bought in the very same block the token was created — only possible if the buy was prepared before the token existed">Creation slot</span><span class="v">${L.slot0.count} wallets · ${fmtPct(L.slot0.pct)} of supply · ${fmtSpend(L.slot0)} spent</span>
+        <span class="k" title="Buyers in the creation slot plus the next ${L.window.slotWindow} slots (~${(((L.window.slotWindow + 1) * (r.slotMs || 400)) / 1000).toFixed(1)} s). This is the 'launch window' everything else is based on">Slots 0–${L.window.slotWindow}</span><span class="v">${L.window.count} wallets · ${fmtPct(L.window.pct)} of supply · ${fmtSpend(L.window)} spent</span>
         <span class="k" title="Everyone who bought in the first ${L.early.seconds} seconds (context, not counted as bundle)">First ${L.early.seconds}s</span><span class="v">${L.early.count} wallets · ${fmtPct(L.early.pct)} of supply${L.partialEarly ? ' <span class="amber">(partial)</span>' : ''}${L.partial ? ' <span class="cyan">(loading…)</span>' : ''}</span>
-        <span class="k" title="What the creator wallet bought in the create transaction">Dev buy</span><span class="v">${fmtPct(dev)} of supply · ${fmtSol(L.creatorDevBuy.sol)} spent</span>
+        <span class="k" title="What the creator wallet bought in the create transaction">Dev buy</span><span class="v">${fmtPct(dev)} of supply · ${fmtSpend(L.creatorDevBuy)} spent</span>
       </div>`;
       const sub = cls ? `${fmtPct(bundle)} bundle · ${fmtPct(sniper)} snipers` : `${fmtPct(L.window.pct)} in ${L.window.count} wallets`;
       return this.sec('launch', 'Launch window', sub, bar + kv);
@@ -406,7 +415,7 @@ tr.how td { border-bottom: 1px solid #171b25; }
       const soldShare = totalBought ? Math.max(0, Math.min(1, 1 - totalNow / totalBought)) : null;
       const rows = [
         `<span class="k" title="The cluster = the dev wallet plus every launch wallet GLASS classified as operator-controlled (bundle). Snipers and organic buyers are tracked separately.">Cluster bought → holds</span><span class="v">${fmtPct(s.clusterBoughtPct)} → <b>${fmtPct(holdsPct)}</b></span>`,
-        `<span class="k">Sold so far</span><span class="v">${soldShare == null ? fmtPct(s.clusterSoldPct) : fmtPct((Math.max(0, totalBought - totalNow) / supply) * 100)} of supply (${soldShare == null ? '—' : Math.round(soldShare * 100) + '% of their bag'})${s.clusterSoldSol ? ` · ${fmtSol(s.clusterSoldSol)} out` : ''}</span>`,
+        `<span class="k">Sold so far</span><span class="v">${soldShare == null ? fmtPct(s.clusterSoldPct) : fmtPct((Math.max(0, totalBought - totalNow) / supply) * 100)} of supply (${soldShare == null ? '—' : Math.round(soldShare * 100) + '% of their bag'})${s.sellsSeen || s.clusterSoldSol ? ` · ${fmtQuotes(s.clusterSoldQuotes, s.clusterSoldSol)} out` : ''}</span>`,
         `<span class="k" title="Minutes after launch when any cluster wallet first sold this token (from their token-account history)">First cluster sell</span><span class="v">${s.firstClusterSellMin == null ? (s.sellsSeen === 0 ? 'none yet' : '—') : `+${s.firstClusterSellMin}m after launch`}</span>`,
         `<span class="k" title="≥2 cluster wallets selling within the same 10 seconds — one hand on the button">Coordinated exits</span><span class="v ${s.coordinatedExits ? 'bad' : ''}">${s.coordinatedExits}</span>`,
         `<span class="k" title="Tokens transferred (not sold) to another wallet — usually to dump from a 'clean' address">Hand-offs</span><span class="v">${s.handoffCount}${s.handoffTokensPct ? ` · ${fmtPct(s.handoffTokensPct)}` : ''}</span>`,
@@ -461,14 +470,14 @@ tr.how td { border-bottom: 1px solid #171b25; }
         const pctS = e.tokens ? fmtPct((e.tokens / supply) * 100) : '';
         const w = who(e.wallet, e.walletKind);
         let txt;
-        if (e.side === 'sell') txt = `${w} ${link(e.wallet)} sold ${pctS}${e.sol ? ` for ${fmtSol(e.sol)}` : ''}${e.closed ? ' <span class="muted">(everything)</span>' : ''}`;
-        else if (e.side === 'buy') txt = `${w} ${link(e.wallet)} bought ${pctS}${e.sol ? ` (${fmtSol(e.sol)})` : ''}`;
+        if (e.side === 'sell') txt = `${w} ${link(e.wallet)} sold ${pctS}${e.quotes || e.sol ? ` for ${fmtSpend(e)}` : ''}${e.closed ? ' <span class="muted">(everything)</span>' : ''}`;
+        else if (e.side === 'buy') txt = `${w} ${link(e.wallet)} bought ${pctS}${e.quotes || e.sol ? ` (${fmtSpend(e)})` : ''}`;
         else if (e.side === 'transfer_out') txt = `${w} ${link(e.wallet)} moved ${pctS} to ${e.to ? link(e.to) : 'another wallet'} <span class="muted">(hand-off)</span>`;
         else if (e.side === 'transfer_in') txt = `${w} ${link(e.wallet)} received ${pctS}${e.from ? ` from ${link(e.from)}` : ''}`;
         else txt = `${w} ${link(e.wallet)} ${esc(e.side)}`;
         return `<div class="ev ${esc(e.side)}">${when(e.t)}<span>${e.live ? '<span class="live-dot"></span>' : ''}${txt}</span></div>`;
       });
-      const exitsNote = (l?.exitEvents || []).slice(0, 2).map((x) => `<div class="ev sell"><span class="t">+${x.minutesAfterLaunch}m</span><span><b>${x.wallets} wallets sold within 10 s</b> — ${fmtPct(x.pct)} of supply, ${fmtSol(x.sol)} <span class="muted">(coordinated exit)</span></span></div>`).join('');
+      const exitsNote = (l?.exitEvents || []).slice(0, 2).map((x) => `<div class="ev sell"><span class="t">+${x.minutesAfterLaunch}m</span><span><b>${x.wallets} wallets sold within 10 s</b> — ${fmtPct(x.pct)} of supply, ${fmtSpend(x)} <span class="muted">(coordinated exit)</span></span></div>`).join('');
       return `<div class="feed"><div class="note" style="margin:6px 0 2px"><b>What just happened</b> <span class="muted">· cluster wallets, newest first · "+Nm" = minutes after launch</span></div>${exitsNote}${rows.join('')}</div>`;
     }
     autoRefreshEligible() {
@@ -511,7 +520,7 @@ tr.how td { border-bottom: 1px solid #171b25; }
             const tag = l.relation === 'created' ? (l.viaInfra ? 'funder\'s dev' : 'same dev') : l.viaInfra ? 'same funder' : 'same wallets';
             const when = l.createdAt ? `${ago(l.createdAt).replace(' ago', '')} · ` : '';
             const showHow = l.source !== 'pump.fun' || l.viaInfra;
-            return `<tr><td class="pl"><a class="sym" href="${esc(l.url)}" target="_blank" rel="noopener" title="${esc(l.symbol || l.mint)}">${esc(l.symbol || short(l.mint))}</a><span class="pls" title="${esc(how)}">${when}${tag}</span></td><td class="num" title="${l.source === 'on-chain' ? 'from on-chain trades (no price candles yet) — a lower bound' : l.source === 'pump.fun' ? 'all-time high market cap (pump.fun record)' : ''}">${fmtUsd(l.peakMcapUsd)}${l.source === 'on-chain' ? '<span class="muted">≥</span>' : ''}${l.graduated ? ' <span class="good" title="graduated to a DEX">G</span>' : ''}</td><td class="num">${l.minutesToPeak == null ? '—' : l.minutesToPeak <= 0.1 ? '<span class="muted" title="peaked in the launch block">launch</span>' : fmtMin(l.minutesToPeak)}</td><td class="num">${fmtUsd(l.nowMcapUsd)}</td><td class="sold">${l.clusterExit?.sells ? `<span class="bad" title="${esc(`sold ${l.clusterExit.soldShare != null ? Math.round(l.clusterExit.soldShare * 100) + '% of their bag' : ''} ${l.clusterExit.solOut ? 'for ' + l.clusterExit.solOut.toFixed(2) + ' SOL' : ''}`)}">${l.clusterExit.firstSellSec != null && l.clusterExit.firstSellSec < 90 ? `+${l.clusterExit.firstSellSec}s` : `+${l.clusterExit.firstSellMin}m`}</span>` : l.clusterExit ? `<span class="good" title="${esc(l.clusterExit.note || '')}">held</span>` : '<span class="muted" title="not checked">—</span>'}</td></tr>
+            return `<tr><td class="pl"><a class="sym" href="${esc(l.url)}" target="_blank" rel="noopener" title="${esc(l.symbol || l.mint)}">${esc(l.symbol || short(l.mint))}</a><span class="pls" title="${esc(how)}">${when}${tag}</span></td><td class="num" title="${l.source === 'on-chain' ? 'from on-chain trades (no price candles yet) — a lower bound' : l.source === 'pump.fun' ? 'all-time high market cap (pump.fun record)' : ''}">${fmtUsd(l.peakMcapUsd)}${l.source === 'on-chain' ? '<span class="muted">≥</span>' : ''}${l.graduated ? ' <span class="good" title="graduated to a DEX">G</span>' : ''}</td><td class="num">${l.minutesToPeak == null ? '—' : l.minutesToPeak <= 0.1 ? '<span class="muted" title="peaked in the launch block">launch</span>' : fmtMin(l.minutesToPeak)}</td><td class="num">${fmtUsd(l.nowMcapUsd)}</td><td class="sold">${l.clusterExit?.sells ? `<span class="bad" title="${esc(`sold ${l.clusterExit.soldShare != null ? Math.round(l.clusterExit.soldShare * 100) + '% of their bag' : ''} ${l.clusterExit.quotesOut || l.clusterExit.solOut ? 'for ' + fmtQuotes(l.clusterExit.quotesOut, l.clusterExit.solOut) : ''}`)}">${l.clusterExit.firstSellSec != null && l.clusterExit.firstSellSec < 90 ? `+${l.clusterExit.firstSellSec}s` : `+${l.clusterExit.firstSellMin}m`}</span>` : l.clusterExit ? `<span class="good" title="${esc(l.clusterExit.note || '')}">held</span>` : '<span class="muted" title="not checked">—</span>'}</td></tr>
             ${showHow ? `<tr class="how"><td colspan="5" class="muted" style="font-size:10.5px;padding-top:0">↳ linked because ${esc(how)}</td></tr>` : ''}`;
           })
           .join('')}</table>${o.launches.length > shown.length ? `<div class="note">${o.launches.length - shown.length} more launch${o.launches.length - shown.length === 1 ? '' : 'es'} counted in the rating · <a href="https://pump.fun/profile/${esc(r.creation?.creator || '')}?tab=coins" target="_blank" rel="noopener">all on pump.fun</a></div>` : ''}`;
@@ -571,11 +580,11 @@ tr.how td { border-bottom: 1px solid #171b25; }
         const p = prof.get(b.wallet);
         const kind = b.kind || p?.kind || (b.firstSlotOffset <= L.window.slotWindow ? 'unclassified' : '');
         const fund = p?.fundingLabel ? ` · ${esc(p.fundingLabel)}` : p?.fundingMethod === 'wsol-close' ? ' · WSOL-close funded' : '';
-        return `<tr><td>+${b.firstSlotOffset}</td><td>${link(b.wallet)}${kind ? `<span class="pill ${kind}" title="${esc(b.kindReason || '')}">${kind}</span>` : ''}</td><td class="num" title="${b.flipped ? `bought ${fmtPct(b.boughtPct)} and sold part or all of it again inside the launch window (flip)` : 'share of supply still held at the end of the launch window'}">${fmtPct(b.pct)}${b.flipped ? ' <span class="amber" title="flipped: sold inside the launch window">↺</span>' : ''}</td><td class="num">${fmtSol(b.sol)}</td><td class="num">${holdsCell(b.wallet)}</td><td class="muted" title="${esc((p?.flags || []).join('; '))}">${routeCell(b)}${fund}</td></tr>`;
+        return `<tr><td>+${b.firstSlotOffset}</td><td>${link(b.wallet)}${kind ? `<span class="pill ${kind}" title="${esc(b.kindReason || '')}">${kind}</span>` : ''}</td><td class="num" title="${b.flipped ? `bought ${fmtPct(b.boughtPct)} and sold part or all of it again inside the launch window (flip)` : 'share of supply still held at the end of the launch window'}">${fmtPct(b.pct)}${b.flipped ? ' <span class="amber" title="flipped: sold inside the launch window">↺</span>' : ''}</td><td class="num">${fmtSpend(b)}</td><td class="num">${holdsCell(b.wallet)}</td><td class="muted" title="${esc((p?.flags || []).join('; '))}">${routeCell(b)}${fund}</td></tr>`;
       });
       const dev = L.creatorDevBuy;
-      const devRow = r.creation ? `<tr><td>0</td><td>${link(r.creation.creator)}<span class="pill" style="color:#c084fc">dev</span></td><td class="num">${fmtPct(dev.pct)}</td><td class="num">${fmtSol(dev.sol)}</td><td class="num">${holdsCell(r.creation.creator)}</td><td class="muted">create tx ${link(r.creation.sig, 'tx', 'view')}</td></tr>` : '';
-      const inner = `<div class="tscroll"><table><tr><th title="Slots after the creation slot (0 = same block the token was created in; one slot ≈ ${r.slotMs || 400} ms)">slot</th><th title="Buyer wallet. Pill = GLASS classification (hover for why)">wallet</th><th class="num" title="Share of total token supply this wallet ended up with inside the launch window (net of anything it sold back). ↺ = bought and sold inside the window">% supply</th><th class="num" title="SOL the wallet spent on its launch buys">SOL paid</th><th class="num" title="Share of supply the wallet holds right now (0 = fully sold). Updates live.">holds now</th><th title="Which program the buy went through (pump.fun directly, or a router/bot), and how the wallet was funded">route · funding</th></tr>${devRow}${rows.join('')}</table></div>${L.buyers.length > 40 ? `<div class="note">${L.buyers.length - 40} more early buyers not shown.</div>` : ''}<div class="note">↺ = bought and sold again inside the launch window · "via XXXX…" = an unlabelled bot/router program · scroll sideways for more columns.</div>`;
+      const devRow = r.creation ? `<tr><td>0</td><td>${link(r.creation.creator)}<span class="pill" style="color:#c084fc">dev</span></td><td class="num">${fmtPct(dev.pct)}</td><td class="num">${fmtSpend(dev)}</td><td class="num">${holdsCell(r.creation.creator)}</td><td class="muted">create tx ${link(r.creation.sig, 'tx', 'view')}</td></tr>` : '';
+      const inner = `<div class="tscroll"><table><tr><th title="Slots after the creation slot (0 = same block the token was created in; one slot ≈ ${r.slotMs || 400} ms)">slot</th><th title="Buyer wallet. Pill = GLASS classification (hover for why)">wallet</th><th class="num" title="Share of total token supply this wallet ended up with inside the launch window (net of anything it sold back). ↺ = bought and sold inside the window">% supply</th><th class="num" title="Quote currency the wallet spent on its launch buys">Paid</th><th class="num" title="Share of supply the wallet holds right now (0 = fully sold). Updates live.">holds now</th><th title="Which program the buy went through (pump.fun directly, or a router/bot), and how the wallet was funded">route · funding</th></tr>${devRow}${rows.join('')}</table></div>${L.buyers.length > 40 ? `<div class="note">${L.buyers.length - 40} more early buyers not shown.</div>` : ''}<div class="note">↺ = bought and sold again inside the launch window · "via XXXX…" = an unlabelled bot/router program · scroll sideways for more columns.</div>`;
       return this.sec('receipts', 'Receipts', `${L.buyers.length} early wallets`, inner);
     }
     secScore(r) {
@@ -723,7 +732,8 @@ tr.how td { border-bottom: 1px solid #171b25; }
     const ls = (panel.liveState = panel.liveState || { balances: new Map(), events: [], flash: new Map() });
     if (ev.type === 'curve') {
       const sol = r.solUsd || (r.market?.priceUsd && r.market?.priceNative ? r.market.priceUsd / r.market.priceNative : null);
-      ls.curve = { ...ev, mcapUsd: ev.priceSol && sol ? ev.priceSol * (r.supply || 1e9) * sol : null };
+      const quoteUsd = ev.quoteSymbol === 'USDC' ? 1 : ev.quoteSymbol === 'SOL' ? sol : null;
+      ls.curve = { ...ev, mcapUsd: ev.priceQuote && quoteUsd ? ev.priceQuote * (r.supply || 1e9) * quoteUsd : null };
       if (ls.curve.mcapUsd && r.market) r.market.marketCapUsd = ls.curve.mcapUsd;
       // throttle re-render for price ticks
       clearTimeout(ls.curveTimer);
