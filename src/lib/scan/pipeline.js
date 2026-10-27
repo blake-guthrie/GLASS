@@ -9,7 +9,7 @@ import { trackCluster } from './live.js';
 import { discoverPriorLaunches, analysePriorLaunches, rateOperator, devExitOnLaunch, clusterExitOnLaunch, profileSummary } from './operator.js';
 import { creatorProfile, toPriorLaunches, fetchCoin } from './devprofile.js';
 import { computeScore } from './score.js';
-import { dexTokenInfo, jitoBundleId, solPriceUsd } from '../market.js';
+import { dexTokenInfo, jitoBundleId, solPriceUsd, isUsdQuotedPair } from '../market.js';
 import { pMap } from '../http.js';
 import known from '../../data/known.js';
 
@@ -107,6 +107,11 @@ export async function runScan(rpc, identifier, opts = {}) {
       /* default */
     }
     report.supply = supply;
+    if (report.market && report.market.marketCapUsd == null && report.market.priceUsd != null && supply > 0) {
+      report.market.marketCapUsd = report.market.priceUsd * supply;
+      if (report.market.fdvUsd == null) report.market.fdvUsd = report.market.marketCapUsd;
+      report.market.mcapSource = 'DexScreener price × supply';
+    }
     solPriceUsd().then((v) => (report.solUsd = v || null)).catch(() => {});
     done('resolve');
   } catch (e) {
@@ -256,10 +261,12 @@ export async function runScan(rpc, identifier, opts = {}) {
       const last = [...events].reverse().find((e) => e.priceQuote);
       const createEv = creation.record.pumpEvents?.find((e) => e.type === 'create');
       const priceQuote = last?.priceQuote ?? (createEv?.vSol && createEv?.vTok ? createEv.vSol / createEv.vTok : null);
-      const sol = priceQuote ? await solPriceUsd() : null;
-      if (priceQuote && sol) {
-        report.market.marketCapUsd = priceQuote * report.supply * sol;
-        report.market.priceUsd = priceQuote * sol;
+      const quoteIsUsd = Boolean(isUsdQuotedPair(report.market) || last?.quoteIsUsd || createEv?.quoteIsUsd);
+      const quoteRateUsd = priceQuote ? (quoteIsUsd ? 1 : await solPriceUsd()) : null;
+      if (priceQuote && quoteRateUsd) {
+        report.market.marketCapUsd = priceQuote * report.supply * quoteRateUsd;
+        report.market.priceUsd = priceQuote * quoteRateUsd;
+        if (quoteIsUsd) report.market.isUsdQuoted = true;
         report.market.mcapSource = last ? 'last launch-window trade' : 'initial bonding-curve price (no trades yet)';
         if (!report.market.dexId) report.market.dexId = 'pumpfun';
       }

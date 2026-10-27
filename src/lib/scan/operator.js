@@ -300,7 +300,8 @@ async function onchainOutcome(rpc, launch, exit, supply, solUsd) {
     });
     for (const s of exit?.sellsDetail || []) if (s.priceQuote > peakQuote) peakQuote = s.priceQuote;
     if (!peakQuote) return null;
-    return { peakMcapUsd: peakQuote * supply * solUsd, nowMcapUsd: lastQuote ? lastQuote * supply * solUsd : null, trades };
+    const rate = launch.isUsdQuoted ? 1 : solUsd;
+    return { peakMcapUsd: peakQuote * supply * rate, nowMcapUsd: lastQuote ? lastQuote * supply * rate : null, trades };
   } catch {
     return null;
   }
@@ -347,7 +348,8 @@ export async function devExitOnLaunch(rpc, creator, launch, supply, solUsd, { to
     sells.sort((a, b) => a.t - b.t);
     const first = sells[0];
     const soldTokens = sells.reduce((a, x) => a + x.tokens, 0);
-    const mcapAt = first.priceQuote && solUsd ? first.priceQuote * supply * solUsd : null;
+    const rate = first.quoteIsUsd || launch.isUsdQuoted ? 1 : solUsd;
+    const mcapAt = first.priceQuote && rate ? first.priceQuote * supply * rate : null;
     const peakRef = launch.peakMcapUsd || null;
     return {
       sampledTxs: ordered.length,
@@ -409,7 +411,8 @@ export async function clusterExitOnLaunch(rpc, launch, cluster, sigLists, hist, 
   const soldTokens = sells.reduce((s, x) => s + x.tokens, 0);
   // mcap at first sell: exact from the trade's post-trade price when we have it, else from candles
   let mcapAt = null;
-  if (first.priceQuote && solUsd) mcapAt = first.priceQuote * supply * solUsd;
+  const rate = first.quoteIsUsd || launch.isUsdQuoted ? 1 : solUsd;
+  if (first.priceQuote && rate) mcapAt = first.priceQuote * supply * rate;
   else if (hist?.available) mcapAt = mcapAtTime(hist, first.t);
   // Peak reference: candles when we have them, else the launch's known ATH (pump.fun record)
   const peakRef = hist?.available ? hist.peakMcapUsd : launch.peakMcapUsd || null;

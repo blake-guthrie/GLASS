@@ -1,6 +1,14 @@
 // Market data: DexScreener (pairs, price, mcap), GeckoTerminal (OHLCV → peaks), Jito bundles, pump.fun API (optional).
 import { fetchJson } from './http.js';
-import { SOURCES, PROGRAMS, PUMP_TOTAL_SUPPLY } from './constants.js';
+import { SOURCES, PROGRAMS, USD_QUOTE_MINTS, PUMP_TOTAL_SUPPLY } from './constants.js';
+
+export function isUsdQuotedPair(p) {
+  if (!p) return false;
+  if (p.isUsdQuoted === true) return true;
+  const qAddr = p.quoteToken?.address || p.quoteMint || null;
+  const qSym = String(p.quoteToken?.symbol || p.quoteSymbol || '').toUpperCase();
+  return (qAddr && USD_QUOTE_MINTS.has(qAddr)) || qSym === 'USDC' || qSym === 'USDT' || qSym === 'USD';
+}
 
 const memo = new Map();
 async function cached(key, ttlMs, fn) {
@@ -19,8 +27,19 @@ function pickBestPair(pairs, mint) {
   return list[0];
 }
 
-export function normalisePair(p) {
+export function normalisePair(p, supply = null) {
   if (!p) return null;
+  const usdQuoted = isUsdQuotedPair(p);
+  const priceNative = p.priceNative != null && p.priceNative !== '' ? Number(p.priceNative) : null;
+  const priceUsd =
+    p.priceUsd != null && p.priceUsd !== ''
+      ? Number(p.priceUsd)
+      : usdQuoted && priceNative != null && Number.isFinite(priceNative)
+        ? priceNative
+        : null;
+  const derivedMcap =
+    priceUsd != null && Number.isFinite(priceUsd) && supply != null && supply > 0 ? priceUsd * supply : null;
+  const marketCapUsd = p.marketCap ?? p.fdv ?? derivedMcap;
   return {
     pairAddress: p.pairAddress,
     dexId: p.dexId,
@@ -28,10 +47,13 @@ export function normalisePair(p) {
     mint: p.baseToken?.address,
     name: p.baseToken?.name,
     symbol: p.baseToken?.symbol,
-    priceUsd: p.priceUsd ? Number(p.priceUsd) : null,
-    priceNative: p.priceNative ? Number(p.priceNative) : null,
-    marketCapUsd: p.marketCap ?? p.fdv ?? null,
-    fdvUsd: p.fdv ?? null,
+    quoteMint: p.quoteToken?.address || p.quoteMint || null,
+    quoteSymbol: p.quoteToken?.symbol || p.quoteSymbol || null,
+    isUsdQuoted: usdQuoted,
+    priceUsd,
+    priceNative,
+    marketCapUsd,
+    fdvUsd: p.fdv ?? marketCapUsd,
     liquidityUsd: p.liquidity?.usd ?? null,
     volume24h: p.volume?.h24 ?? null,
     pairCreatedAt: p.pairCreatedAt ?? null,
@@ -158,7 +180,7 @@ export async function geckoOhlcv(pool, timeframe = 'minute', aggregate = 5, limi
  * Uses GeckoTerminal; supply defaults to pump.fun's 1B.
  */
 export async function priceHistory(mint, { supply = PUMP_TOTAL_SUPPLY, createdAtMs } = {}) {
-  return cached(`hist:${mint}`, 120_000, async () => {
+  return cached(`hist:${mint}:${supply}`, 120_000, async () => {
     const { top, pools } = await geckoTopPool(mint);
     if (!top) return { available: false, pools: [] };
     const ageMs = Date.now() - (top.createdAt || createdAtMs || Date.now());

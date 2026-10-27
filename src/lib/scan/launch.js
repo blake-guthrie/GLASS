@@ -1,6 +1,6 @@
 // Stage 1: find the creation transaction, then collect every transaction that touched the mint
 // in the launch window (creation slot + N) and the early window (first N seconds).
-import { PROGRAMS, AVG_SLOT_MS, LAMPORTS_PER_SOL } from '../constants.js';
+import { PROGRAMS, USD_QUOTE_MINTS, AVG_SLOT_MS, LAMPORTS_PER_SOL } from '../constants.js';
 import { findProgramAddress, isOnCurve } from '../pda.js';
 import { decodeBase58 } from '../base58.js';
 import { parseTx, txInitialisesMint } from '../txparse.js';
@@ -293,6 +293,8 @@ export function extractLaunchEvents(records, mint, creation) {
           tokens: t.tokenAmount,
           sol: t.quoteAmount,
           priceQuote: t.priceQuote,
+          quoteMint: t.quoteMint || pumpIx?.quoteMint || null,
+          quoteIsUsd: Boolean(t.quoteIsUsd || pumpIx?.quoteIsUsd),
           isCreator: t.user === creator,
           slippageLimitSol: pumpIx?.solLimit ?? (pumpIx?.solIn ? pumpIx.solIn : null),
           pumpIxName: pumpIx?.name || null,
@@ -314,15 +316,28 @@ export function extractLaunchEvents(records, mint, creation) {
       // SOL paid: pump.fun → share of the curve's SOL delta; other launchpads → the wallet's own SOL change
       // (minus fees is close enough; WSOL-wrapped routes show up as the wallet's lamport delta too).
       const ownDelta = Math.abs((rec.solDelta[d.owner] || 0) / LAMPORTS_PER_SOL);
-      const solShare = isBuy && curveDelta > 0 ? (curveDelta * d.delta) / totalBuyTokens : curveDelta < 0 && !isBuy ? -curveDelta : ownDelta;
+      const usdDeltaRec = rec.tokenDeltas.find((td) => td.owner === d.owner && USD_QUOTE_MINTS.has(td.mint) && Math.abs(td.delta) > 0);
+      const usdQuoteDelta = usdDeltaRec ? Math.abs(usdDeltaRec.delta) : 0;
       const pumpIx = rec.pumpIxs.find((p) => p.user === d.owner) || rec.pumpIxs[0] || null;
+      const quoteIsUsd = Boolean(pumpIx?.quoteIsUsd || (usdQuoteDelta > 0 && ownDelta < 0.01));
+      const solShare = quoteIsUsd && usdQuoteDelta > 0
+        ? usdQuoteDelta
+        : isBuy && curveDelta > 0
+          ? (curveDelta * d.delta) / totalBuyTokens
+          : curveDelta < 0 && !isBuy
+            ? -curveDelta
+            : ownDelta;
+      const absTokens = Math.abs(d.delta);
+      const derivedPriceQuote = quoteIsUsd && usdQuoteDelta > 0 && absTokens > 0 ? usdQuoteDelta / absTokens : null;
       events.push({
         ...base,
         wallet: d.owner,
         side: isBuy ? 'buy' : 'sell',
-        tokens: Math.abs(d.delta),
+        tokens: absTokens,
         sol: solShare,
-        priceQuote: null,
+        priceQuote: derivedPriceQuote,
+        quoteMint: usdDeltaRec?.mint || pumpIx?.quoteMint || null,
+        quoteIsUsd,
         isCreator: d.owner === creator,
         slippageLimitSol: pumpIx?.solLimit ?? null,
         pumpIxName: pumpIx?.name || null,
