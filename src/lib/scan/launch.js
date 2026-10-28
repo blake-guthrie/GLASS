@@ -3,7 +3,7 @@
 import { PROGRAMS, AVG_SLOT_MS, LAMPORTS_PER_SOL } from '../constants.js';
 import { findProgramAddress, isOnCurve } from '../pda.js';
 import { decodeBase58 } from '../base58.js';
-import { parseTx, txInitialisesMint } from '../txparse.js';
+import { parseTx, txInitialisesMint, classifyForMint } from '../txparse.js';
 
 export async function derivePumpAccounts(mint) {
   const mintBytes = decodeBase58(mint);
@@ -291,9 +291,11 @@ export function extractLaunchEvents(records, mint, creation) {
           wallet: t.user,
           side: t.isBuy ? 'buy' : 'sell',
           tokens: t.tokenAmount,
-          sol: t.quoteAmount,
+          sol: t.quoteMint === PROGRAMS.WSOL ? t.quoteAmount : null,
+          quoteAmount: t.quoteAmount, quoteMint: t.quoteMint, quoteDecimals: t.quoteDecimals,
           priceQuote: t.priceQuote,
           isCreator: t.user === creator,
+          slippageLimitQuote: pumpIx?.quoteLimit ?? pumpIx?.quoteIn ?? null,
           slippageLimitSol: pumpIx?.solLimit ?? (pumpIx?.solIn ? pumpIx.solIn : null),
           pumpIxName: pumpIx?.name || null,
           fromEvent: true,
@@ -316,14 +318,20 @@ export function extractLaunchEvents(records, mint, creation) {
       const ownDelta = Math.abs((rec.solDelta[d.owner] || 0) / LAMPORTS_PER_SOL);
       const solShare = isBuy && curveDelta > 0 ? (curveDelta * d.delta) / totalBuyTokens : curveDelta < 0 && !isBuy ? -curveDelta : ownDelta;
       const pumpIx = rec.pumpIxs.find((p) => p.user === d.owner) || rec.pumpIxs[0] || null;
+      const quote = classifyForMint(rec, mint, d.owner);
+      const nonSol = 'quoteMint' in quote && quote.quoteMint !== PROGRAMS.WSOL;
       events.push({
         ...base,
         wallet: d.owner,
         side: isBuy ? 'buy' : 'sell',
         tokens: Math.abs(d.delta),
-        sol: solShare,
+        sol: nonSol ? null : solShare,
+        quoteMint: quote.quoteMint ?? PROGRAMS.WSOL,
+        quoteDecimals: quote.quoteDecimals ?? (nonSol ? null : 9),
+        quoteAmount: nonSol ? quote.quoteAmount : solShare,
         priceQuote: null,
         isCreator: d.owner === creator,
+        slippageLimitQuote: pumpIx?.quoteLimit ?? pumpIx?.quoteIn ?? null,
         slippageLimitSol: pumpIx?.solLimit ?? null,
         pumpIxName: pumpIx?.name || null,
         fromEvent: false,

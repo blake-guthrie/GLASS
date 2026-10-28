@@ -2,6 +2,7 @@
 import { decodeBase58, encodeBase58, readU32LE, readU64LE } from './base58.js';
 import { PROGRAMS, PUMP_IX, PUMP_BUY_IX, PUMP_SELL_IX, PUMP_CREATE_IX, ANCHOR_EVENT_CPI, PUMP_EVENTS, JITO_TIP_ACCOUNTS, LAMPORTS_PER_SOL } from './constants.js';
 
+import { quoteInfo, quoteUnits } from './quote.js';
 const DISC = Object.entries(PUMP_IX).map(([name, bytes]) => [name, bytes.join(',')]);
 const EVENT_CPI_KEY = ANCHOR_EVENT_CPI.join(',');
 const EVENT_KEYS = Object.fromEntries(Object.entries(PUMP_EVENTS).map(([n, b]) => [b.join(','), n]));
@@ -25,6 +26,7 @@ export function decodePumpEvent(ix) {
   if (!name) return null;
   let o = 16;
   const pk = () => {
+    if (o + 32 > d.length) throw new Error('truncated public key');
     const s = encodeBase58(d.subarray(o, o + 32));
     o += 32;
     return s;
@@ -35,6 +37,7 @@ export function decodePumpEvent(ix) {
     return v;
   };
   const str = () => {
+    if (o + 4 > d.length || o + 4 + readU32LE(d, o) > d.length) throw new Error('truncated string');
     const [s, next] = readString(d, o);
     o = next;
     return s;
@@ -42,37 +45,70 @@ export function decodePumpEvent(ix) {
   try {
     if (name === 'TradeEvent') {
       const mint = pk();
-      const quoteAmount = Number(u64()) / LAMPORTS_PER_SOL;
+      const legacyAmount = u64();
       const tokenAmount = Number(u64()) / 1e6;
       const isBuy = d[o++] === 1;
       const user = pk();
       const timestamp = Number(u64());
-      const vSol = Number(u64()) / LAMPORTS_PER_SOL;
+      const legacyVirtual = u64();
       const vTok = Number(u64()) / 1e6;
-      const rSol = Number(u64()) / LAMPORTS_PER_SOL;
+      const legacyReal = u64();
       const rTok = Number(u64()) / 1e6;
       const feeRecipient = pk();
-      o += 8; // fee_basis_points
-      const fee = Number(u64()) / LAMPORTS_PER_SOL;
+      u64(); // fee_basis_points
+      const rawFee = u64();
       const creator = pk();
-      o += 8; // creator_fee_basis_points
-      const creatorFee = Number(u64()) / LAMPORTS_PER_SOL;
-      return { type: 'trade', mint, quoteAmount, tokenAmount, isBuy, user, timestamp, vSol, vTok, rSol, rTok, feeRecipient, fee, creator, creatorFee, priceQuote: vTok > 0 ? vSol / vTok : null };
+      u64(); // creator_fee_basis_points
+      const rawCreatorFee = u64();
+      let quoteMint = PROGRAMS.WSOL, quoteSource = 'legacy';
+      let amount = legacyAmount, virtual = legacyVirtual, real = legacyReal;
+      // Optional, append-only fields in pump-fun's IDL. Never reinterpret the legacy SOL
+      // fields as USDC: current events carry separate quote amounts/reserves after shareholders.
+      if (o < d.length) {
+        o += 1; // track_volume
+        for (let i = 0; i < 4; i++) u64();
+        str(); // ix_name
+        if (o < d.length) o += 1; // mayhem_mode
+        if (o < d.length) { u64(); u64(); } // cashback bps/amount
+        if (o < d.length) { u64(); u64(); } // buyback bps/amount
+        if (o < d.length) {
+          if (o + 4 > d.length) throw new Error('truncated shareholders');
+          const count = readU32LE(d, o); o += 4;
+          if (count > Math.floor((d.length - o) / 34)) throw new Error('truncated shareholders');
+          o += count * 34; // pubkey + u16 share_bps
+        }
+        if (o < d.length) {
+          quoteMint = pk(); quoteSource = 'event';
+          amount = u64(); virtual = u64(); real = u64();
+        }
+      }
+      const quote = quoteInfo(quoteMint);
+      const quoteAmount = quoteUnits(amount, quoteMint);
+      const vQuote = quoteUnits(virtual, quoteMint), rQuote = quoteUnits(real, quoteMint);
+      const native = quote.quoteMint === PROGRAMS.WSOL;
+      return { type: 'trade', mint, ...quote, quoteSource, quoteAmount, tokenAmount, isBuy, user, timestamp,
+        vQuote, rQuote, vSol: native ? vQuote : null, vTok, rSol: native ? rQuote : null, rTok,
+        feeRecipient, fee: quoteUnits(rawFee, quoteMint), creator, creatorFee: quoteUnits(rawCreatorFee, quoteMint),
+        priceQuote: vTok > 0 && vQuote != null ? vQuote / vTok : null };
     }
     if (name === 'CreateEvent') {
-      const tokenName = str();
-      const symbol = str();
-      const uri = str();
-      const mint = pk();
-      const bondingCurve = pk();
-      const user = pk();
-      const creator = pk();
+      const tokenName = str(), symbol = str(), uri = str();
+      const mint = pk(), bondingCurve = pk(), user = pk(), creator = pk();
       const timestamp = Number(u64());
       const vTok = Number(u64()) / 1e6;
-      const vSol = Number(u64()) / LAMPORTS_PER_SOL;
-      const rTok = Number(u64()) / 1e6;
-      const supply = Number(u64()) / 1e6;
-      return { type: 'create', tokenName, symbol, uri, mint, bondingCurve, user, creator, timestamp, vTok, vSol, rTok, supply };
+      let virtual = u64();
+      const rTok = Number(u64()) / 1e6, supply = Number(u64()) / 1e6;
+      let quoteMint = PROGRAMS.WSOL;
+      if (o < d.length) {
+        pk(); // token_program
+        if (o < d.length) o += 1; // is_mayhem_mode
+        if (o < d.length) o += 1; // is_cashback_enabled
+        if (o < d.length) { quoteMint = pk(); virtual = u64(); }
+      }
+      const quote = quoteInfo(quoteMint), vQuote = quoteUnits(virtual, quoteMint);
+      return { type: 'create', tokenName, symbol, uri, mint, bondingCurve, user, creator, timestamp,
+        ...quote, vTok, vQuote, vSol: quote.quoteMint === PROGRAMS.WSOL ? vQuote : null, rTok, supply,
+        priceQuote: vTok > 0 && vQuote != null ? vQuote / vTok : null };
     }
     if (name === 'CompleteEvent') {
       const user = pk();
@@ -105,7 +141,10 @@ function readString(bytes, off) {
  * Decode a pump.fun instruction (top-level or inner).
  * Account layouts differ per variant, so `signers` (from the tx) is used to pin the user:
  *   legacy buy/sell/buy_exact_sol_in : [global, fee_recipient, mint, bonding_curve, ...user@6]
- *   *_v2 / *_v3 (quote-asset aware)  : [global, mint, quote_mint, ..., bonding_curve, ..., user]
+ *   *_v2 / *_v3 (quote-asset aware)  : [global, mint, quote_mint, ..., bonding_curve, ..., user]; the quote mint
+ *                                      is read from accounts[2] only for these. The user is the first signer that is
+ *                                      not the mint (the mint also signs create txs), falling back to accounts[8].
+ *   buy_exact_quote_in (no suffix)   : modern account order, but always priced as SOL
  *   create / create_v2               : [mint, ...user]
  */
 export function decodePumpIx(ix, signers = []) {
@@ -121,17 +160,21 @@ export function decodePumpIx(ix, signers = []) {
       // All variants: [amount u64][limit u64]. "exact_*_in" variants put the quote amount first.
       const a = Number(readU64LE(data, 8));
       const b = Number(readU64LE(data, 16));
+      // Only the _v2/_v3 layouts carry a quote mint at accounts[2]; the bare exact_quote_in stays on WSOL.
+      Object.assign(out, quoteInfo(/_v[23]$/.test(name) ? accounts[2] : PROGRAMS.WSOL));
       if (name.includes('exact_sol_in') || name.includes('exact_quote_in')) {
-        out.solIn = a / LAMPORTS_PER_SOL;
+        out.quoteIn = quoteUnits(a, out.quoteMint);
+        out.solIn = out.quoteMint === PROGRAMS.WSOL ? out.quoteIn : null;
         out.minTokensOut = b / 1e6;
       } else {
         out.tokenAmount = a / 1e6;
-        out.solLimit = b / LAMPORTS_PER_SOL; // max_sol_cost (buy) / min_sol_output (sell)
+        out.quoteLimit = quoteUnits(b, out.quoteMint);
+        out.solLimit = out.quoteMint === PROGRAMS.WSOL ? out.quoteLimit : null;
       }
       if (modern) {
         out.mint = accounts[1];
-        out.quoteMint = accounts[2];
-        out.user = firstSigner || accounts[8] || null;
+        // The mint also signs the create tx, so it must not be mistaken for the trader.
+        out.user = accounts.find((a) => a !== out.mint && signers.includes(a)) || accounts[8] || null;
         out.feeRecipient = null; // read from TradeEvent instead
         out.bondingCurve = accounts[5] && accounts[5] !== out.user ? accounts[5] : null;
       } else {
@@ -290,6 +333,19 @@ export function parseTx(tx, signatureHint) {
     if (group) for (const inner of group.instructions) visit(inner, true, ix.programId);
   });
 
+  // A legacy/truncated event cannot price a non-SOL instruction. Do not guess its
+  // missing quote fields from lamports or another token traded in the transaction.
+  for (const e of pumpEvents) {
+    if (e.type !== 'trade' || e.quoteSource !== 'legacy') continue;
+    const quotes = new Set(pumpIxs.filter((p) => p.mint === e.mint && p.user === e.user && 'quoteMint' in p).map((p) => p.quoteMint));
+    if ([...quotes].some((mint) => mint !== PROGRAMS.WSOL)) {
+      Object.assign(e, quoteInfo(quotes.size === 1 ? [...quotes][0] : null), {
+        quoteAmount: null, vQuote: null, rQuote: null, vSol: null, rSol: null,
+        priceQuote: null, fee: null, creatorFee: null, quoteSource: 'incomplete',
+      });
+    }
+  }
+
   // Jito tip = system transfer to a tip account (anywhere) or SOL delta into a tip account
   let jitoTip = 0;
   let tipAccount = null;
@@ -368,9 +424,15 @@ export function txInitialisesMint(tx, mint) {
  */
 export function classifyForMint(rec, mint, wallet) {
   const ev = rec.pumpEvents?.find((e) => e.type === 'trade' && e.mint === mint && e.user === wallet);
-  if (ev) return { side: ev.isBuy ? 'buy' : 'sell', tokens: ev.tokenAmount, sol: ev.quoteAmount, priceQuote: ev.priceQuote, fromEvent: true };
+  if (ev) return { side: ev.isBuy ? 'buy' : 'sell', tokens: ev.tokenAmount, sol: ev.quoteMint === PROGRAMS.WSOL ? ev.quoteAmount : null, quoteAmount: ev.quoteAmount, quoteMint: ev.quoteMint, quoteDecimals: ev.quoteDecimals, priceQuote: ev.priceQuote, fromEvent: true };
   const td = rec.tokenDeltas.find((d) => d.owner === wallet && d.mint === mint);
   if (!td) return { side: null, tokens: 0, sol: 0 };
+  const pump = rec.pumpIxs.find((p) => p.mint === mint && p.user === wallet && 'quoteMint' in p);
+  if (pump && pump.quoteMint !== PROGRAMS.WSOL) {
+    const delta = rec.tokenDeltas.find((d) => d.owner === wallet && d.mint === pump.quoteMint);
+    return { side: td.delta > 0 ? 'buy' : 'sell', tokens: Math.abs(td.delta), sol: null,
+      ...quoteInfo(pump.quoteMint), quoteAmount: pump.quoteDecimals != null && delta ? Math.abs(delta.delta) : null, priceQuote: null };
+  }
   const solChange = (rec.solDelta[wallet] || 0) / LAMPORTS_PER_SOL;
   const isSwap = rec.pumpIxs.some((p) => p.kind === 'buy' || p.kind === 'sell') || rec.programs.some((p) => p === PROGRAMS.PUMPSWAP || p === PROGRAMS.JUPITER_V6 || p === PROGRAMS.RAYDIUM_AMM || p === PROGRAMS.RAYDIUM_CPMM || p === PROGRAMS.METEORA_DLMM);
   const plainTransfer = rec.splTransfers.some((t) => t.mint === mint && !t.via && (t.fromOwner === wallet || t.toOwner === wallet));

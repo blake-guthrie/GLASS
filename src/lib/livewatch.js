@@ -2,10 +2,10 @@
 // account for the mint (balance changes = buys / sells / transfers, sub-second) and on the pump.fun
 // bonding curve (live price / market cap from its virtual reserves). No polling, no page scraping.
 import { PROGRAMS } from './constants.js';
-import { decodeBase58 } from './base58.js';
+import { decodeBase58, encodeBase58 } from './base58.js';
 import { findProgramAddress } from './pda.js';
 
-const LAMPORTS = 1e9;
+import { quoteInfo, quoteUnits, quoteUsd } from './quote.js';
 
 export function wsUrlFor(httpUrl) {
   try {
@@ -36,12 +36,18 @@ export function decodeCurve(b64) {
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     if (bytes.length < 49) return null;
     const vTok = readU64(bytes, 8) / 1e6;
-    const vSol = readU64(bytes, 16) / LAMPORTS;
+    // quote_mint follows creator (32 bytes) and the two mode flags.
+    if (bytes.length > 83 && bytes.length < 115) return null;
+    const quote = quoteInfo(bytes.length >= 115 ? encodeBase58(bytes.subarray(83,115)) : PROGRAMS.WSOL);
+    const vQuote = quoteUnits(readU64(bytes, 16), quote.quoteMint);
     const rTok = readU64(bytes, 24) / 1e6;
-    const rSol = readU64(bytes, 32) / LAMPORTS;
+    const rQuote = quoteUnits(readU64(bytes, 32), quote.quoteMint);
     const supply = readU64(bytes, 40) / 1e6;
     const complete = bytes[48] === 1;
-    return { vTok, vSol, rTok, rSol, supply, complete, priceSol: vTok > 0 ? vSol / vTok : null };
+    const priceQuote = vTok > 0 && vQuote != null ? vQuote / vTok : null;
+    const native = quote.quoteMint === PROGRAMS.WSOL;
+    return { ...quote, vTok, vQuote, rTok, rQuote, supply, complete, priceQuote,
+      vSol: native ? vQuote : null, rSol: native ? rQuote : null, priceSol: native ? priceQuote : null };
   } catch {
     return null;
   }
@@ -135,7 +141,7 @@ export class LiveWatcher {
     if (meta.kind === 'curve') {
       const data = Array.isArray(value?.data) ? value.data[0] : null;
       const c = data ? decodeCurve(data) : null;
-      if (c) this.o.onEvent?.({ type: 'curve', at, slot, ...c });
+      if (c) this.o.onEvent?.({ type: 'curve', at, slot, ...c, priceUsd: quoteUsd(c.priceQuote, c.quoteMint, this.o.solUsd) });
       return;
     }
     // token account: value null = account closed (sold everything and closed the ATA)
