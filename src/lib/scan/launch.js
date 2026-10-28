@@ -332,7 +332,7 @@ export function extractLaunchEvents(records, mint, creation) {
         priceQuote: null,
         isCreator: d.owner === creator,
         slippageLimitQuote: pumpIx?.quoteLimit ?? pumpIx?.quoteIn ?? null,
-          slippageLimitSol: pumpIx?.solLimit ?? null,
+        slippageLimitSol: pumpIx?.solLimit ?? null,
         pumpIxName: pumpIx?.name || null,
         fromEvent: false,
       });

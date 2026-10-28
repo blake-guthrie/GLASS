@@ -21,4 +21,3 @@ export function marketSolUsd(market) {
   const rate = market?.priceUsd / market?.priceNative;
   return Number.isFinite(rate) && rate > 0 ? rate : null;
 }
-

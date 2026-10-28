@@ -254,7 +254,7 @@ export async function runScan(rpc, identifier, opts = {}) {
     // Fresh tokens are often not on DexScreener yet: derive mcap from the last trade's reserves, or from
     // the create event's initial virtual reserves when nobody has traded yet.
     if (report.market && report.market.marketCapUsd == null) {
-      const last = events.at(-1);
+      const last = [...events].reverse().find((e) => e.priceQuote != null);
       const createEv = creation.record.pumpEvents?.find((e) => e.type === 'create' && e.mint === report.mint);
       const priced = last || createEv;
       let priceUsd = quoteUsd(priced?.priceQuote, priced?.quoteMint, report.solUsd);

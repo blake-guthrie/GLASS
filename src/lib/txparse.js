@@ -3,7 +3,6 @@ import { decodeBase58, encodeBase58, readU32LE, readU64LE } from './base58.js';
 import { PROGRAMS, PUMP_IX, PUMP_BUY_IX, PUMP_SELL_IX, PUMP_CREATE_IX, ANCHOR_EVENT_CPI, PUMP_EVENTS, JITO_TIP_ACCOUNTS, LAMPORTS_PER_SOL } from './constants.js';
 
 import { quoteInfo, quoteUnits } from './quote.js';
-
 const DISC = Object.entries(PUMP_IX).map(([name, bytes]) => [name, bytes.join(',')]);
 const EVENT_CPI_KEY = ANCHOR_EVENT_CPI.join(',');
 const EVENT_KEYS = Object.fromEntries(Object.entries(PUMP_EVENTS).map(([n, b]) => [b.join(','), n]));
@@ -111,7 +110,6 @@ export function decodePumpEvent(ix) {
         ...quote, vTok, vQuote, vSol: quote.quoteMint === PROGRAMS.WSOL ? vQuote : null, rTok, supply,
         priceQuote: vTok > 0 && vQuote != null ? vQuote / vTok : null };
     }
-
     if (name === 'CompleteEvent') {
       const user = pk();
       const mint = pk();
@@ -143,7 +141,10 @@ function readString(bytes, off) {
  * Decode a pump.fun instruction (top-level or inner).
  * Account layouts differ per variant, so `signers` (from the tx) is used to pin the user:
  *   legacy buy/sell/buy_exact_sol_in : [global, fee_recipient, mint, bonding_curve, ...user@6]
- *   *_v2 / *_v3 (quote-asset aware)  : [global, mint, quote_mint, ..., bonding_curve, ..., user]
+ *   *_v2 / *_v3 (quote-asset aware)  : [global, mint, quote_mint, ..., bonding_curve, ..., user]; the quote mint
+ *                                      is read from accounts[2] only for these. The user is the first signer that is
+ *                                      not the mint (the mint also signs create txs), falling back to accounts[8].
+ *   buy_exact_quote_in (no suffix)   : modern account order, but always priced as SOL
  *   create / create_v2               : [mint, ...user]
  */
 export function decodePumpIx(ix, signers = []) {
@@ -159,7 +160,8 @@ export function decodePumpIx(ix, signers = []) {
       // All variants: [amount u64][limit u64]. "exact_*_in" variants put the quote amount first.
       const a = Number(readU64LE(data, 8));
       const b = Number(readU64LE(data, 16));
-      Object.assign(out, quoteInfo(modern ? accounts[2] : PROGRAMS.WSOL));
+      // Only the _v2/_v3 layouts carry a quote mint at accounts[2]; the bare exact_quote_in stays on WSOL.
+      Object.assign(out, quoteInfo(/_v[23]$/.test(name) ? accounts[2] : PROGRAMS.WSOL));
       if (name.includes('exact_sol_in') || name.includes('exact_quote_in')) {
         out.quoteIn = quoteUnits(a, out.quoteMint);
         out.solIn = out.quoteMint === PROGRAMS.WSOL ? out.quoteIn : null;
@@ -171,10 +173,10 @@ export function decodePumpIx(ix, signers = []) {
       }
       if (modern) {
         out.mint = accounts[1];
-        // quote identity was normalized before decoding the amount.
-        out.user = accounts[name.endsWith('_v3') ? 8 : 13] || firstSigner || null;
+        // The mint also signs the create tx, so it must not be mistaken for the trader.
+        out.user = accounts.find((a) => a !== out.mint && signers.includes(a)) || accounts[8] || null;
         out.feeRecipient = null; // read from TradeEvent instead
-        out.bondingCurve = accounts[name.endsWith('_v3') ? 5 : 10] || null;
+        out.bondingCurve = accounts[5] && accounts[5] !== out.user ? accounts[5] : null;
       } else {
         out.mint = accounts[2];
         out.user = accounts[6] || firstSigner;
