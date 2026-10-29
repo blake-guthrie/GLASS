@@ -1,7 +1,7 @@
 // Community-maintained labels. Exchange hot wallets classify funding sources; router/bot program IDs
 // label the "route" fingerprint; launcher fee/tip wallets name the launch tool when one is detected.
 // Plain ES module (not JSON) so it loads in every Chrome version's extension service worker.
-// PRs welcome — add an entry with a source link in the PR. Addresses are matched exactly.
+// PRs welcome – add an entry with a source link in the PR. Addresses are matched exactly.
 export default {
   exchanges: {
     '5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9': 'Binance',
@@ -20,6 +20,9 @@ export default {
   },
   programs: {
     'BSfD6SHZigAfDWSjzD5Q41jw8LmKwtmjskPH9XW1mrRW': 'Photon',
+    'GMgnVFR8Jb39LoXsEVzb3DvBy3ywCmdmJquHUy1Lrkqb': 'GMGN',
+    'troyXT7Ty3s2rjJe4bqWaroUrS4Fjd8rbHHNHxcACF4': 'Trojan',
+    'b1oomGGqPKGD6errbyfbVMBuzSC8WtAAYo8MwNafWW1': 'Bloom',
   },
   // Fee / tip wallets of launch tools (Proxima, Sumo, Fortune, Rapid Launch, ...). GLASS discovers shared
   // non-protocol fee recipients per launch automatically; add confirmed ones here to label them by name.
