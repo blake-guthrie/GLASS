@@ -19,8 +19,16 @@ function pickBestPair(pairs, mint) {
   return list[0];
 }
 
-export function normalisePair(p) {
+export function normalisePair(p, supply = PUMP_TOTAL_SUPPLY) {
   if (!p) return null;
+  const priceUsd = p.priceUsd ? Number(p.priceUsd) : null;
+  // DexScreener omits marketCap/fdv for many pairs (esp. USDC-quoted, un-graduated
+  // pump.fun tokens). When both are absent, fall back to priceUsd * supply so the
+  // market cap is still displayed correctly instead of null.
+  let marketCapUsd = p.marketCap ?? p.fdv ?? null;
+  if (marketCapUsd == null && priceUsd != null && supply) {
+    marketCapUsd = priceUsd * supply;
+  }
   return {
     pairAddress: p.pairAddress,
     dexId: p.dexId,
@@ -28,10 +36,10 @@ export function normalisePair(p) {
     mint: p.baseToken?.address,
     name: p.baseToken?.name,
     symbol: p.baseToken?.symbol,
-    priceUsd: p.priceUsd ? Number(p.priceUsd) : null,
+    priceUsd,
     priceNative: p.priceNative ? Number(p.priceNative) : null,
-    marketCapUsd: p.marketCap ?? p.fdv ?? null,
-    fdvUsd: p.fdv ?? null,
+    marketCapUsd,
+    fdvUsd: p.fdv ?? marketCapUsd,
     liquidityUsd: p.liquidity?.usd ?? null,
     volume24h: p.volume?.h24 ?? null,
     pairCreatedAt: p.pairCreatedAt ?? null,
