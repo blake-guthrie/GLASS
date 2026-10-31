@@ -722,9 +722,11 @@ tr.how td { border-bottom: 1px solid #171b25; }
     if (!r || !ev) return;
     const ls = (panel.liveState = panel.liveState || { balances: new Map(), events: [], flash: new Map() });
     if (ev.type === 'curve') {
-      const sol = r.solUsd || (r.market?.priceUsd && r.market?.priceNative ? r.market.priceUsd / r.market.priceNative : null);
-      ls.curve = { ...ev, mcapUsd: ev.priceSol && sol ? ev.priceSol * (r.supply || 1e9) * sol : null };
-      if (ls.curve.mcapUsd && r.market) r.market.marketCapUsd = ls.curve.mcapUsd;
+      const quoteUsd = r.market?.quoteMint === ev.quoteMint && r.market?.priceUsd > 0 && r.market?.priceNative > 0 ? r.market.priceUsd / r.market.priceNative : null;
+      const priceUsd = ev.priceQuote != null && quoteUsd != null ? ev.priceQuote * quoteUsd : ev.priceUsd ?? (ev.priceSol != null && r.solUsd > 0 ? ev.priceSol * r.solUsd : null);
+      const mcap = priceUsd == null ? null : priceUsd * (r.supply || 1e9);
+      ls.curve = { ...ev, mcapUsd: Number.isFinite(mcap) && mcap >= 0 ? mcap : null };
+      if (ls.curve.mcapUsd != null && r.market) r.market.marketCapUsd = ls.curve.mcapUsd;
       // throttle re-render for price ticks
       clearTimeout(ls.curveTimer);
       ls.curveTimer = setTimeout(() => panel.render(), 400);
