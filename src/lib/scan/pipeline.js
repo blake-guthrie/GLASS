@@ -1,5 +1,5 @@
 // Orchestrates the stages and streams partial reports so the panel fills in progressively.
-import { DEFAULTS, PUMP_TOTAL_SUPPLY } from '../constants.js';
+import { DEFAULTS, PUMP_TOTAL_SUPPLY, PROGRAMS } from '../constants.js';
 import { resolveMint } from './resolve.js';
 import { findCreation, collectLaunchTxs, extractLaunchEvents } from './launch.js';
 import { analyseLaunch, enrichWithJito, applyWalletKinds, toolPatternReasons } from './fingerprint.js';
@@ -10,6 +10,7 @@ import { discoverPriorLaunches, analysePriorLaunches, rateOperator, devExitOnLau
 import { creatorProfile, toPriorLaunches, fetchCoin } from './devprofile.js';
 import { computeScore } from './score.js';
 import { dexTokenInfo, jitoBundleId, solPriceUsd } from '../market.js';
+import { fallbackValuation } from '../quote.js';
 import { pMap } from '../http.js';
 import known from '../../data/known.js';
 
@@ -253,14 +254,15 @@ export async function runScan(rpc, identifier, opts = {}) {
     // Fresh tokens are often not on DexScreener yet: derive mcap from the last trade's reserves, or from
     // the create event's initial virtual reserves when nobody has traded yet.
     if (report.market && report.market.marketCapUsd == null) {
-      const last = [...events].reverse().find((e) => e.priceQuote);
+      const last = [...events].reverse().find((e) => Number.isFinite(e.priceQuote));
       const createEv = creation.record.pumpEvents?.find((e) => e.type === 'create');
-      const priceQuote = last?.priceQuote ?? (createEv?.vSol && createEv?.vTok ? createEv.vSol / createEv.vTok : null);
-      const sol = priceQuote ? await solPriceUsd() : null;
-      if (priceQuote && sol) {
-        report.market.marketCapUsd = priceQuote * report.supply * sol;
-        report.market.priceUsd = priceQuote * sol;
-        report.market.mcapSource = last ? 'last launch-window trade' : 'initial bonding-curve price (no trades yet)';
+      const priceRecord = last || createEv;
+      const sol = priceRecord?.quoteMint === PROGRAMS.WSOL && report.market.priceUsd == null ? await solPriceUsd() : report.solUsd;
+      const value = fallbackValuation(report.market, report.supply, priceRecord, sol);
+      if (value) {
+        const hasReportedPrice = Number.isFinite(report.market.priceUsd);
+        Object.assign(report.market, value);
+        report.market.mcapSource = hasReportedPrice ? 'reported USD price × token supply' : last ? 'last launch-window trade' : 'initial bonding-curve price (no trades yet)';
         if (!report.market.dexId) report.market.dexId = 'pumpfun';
       }
     }
