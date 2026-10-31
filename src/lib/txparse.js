@@ -1,6 +1,7 @@
 // Normalise a `jsonParsed` Solana transaction into the flat record the scanners work with.
 import { decodeBase58, encodeBase58, readU32LE, readU64LE } from './base58.js';
 import { PROGRAMS, PUMP_IX, PUMP_BUY_IX, PUMP_SELL_IX, PUMP_CREATE_IX, ANCHOR_EVENT_CPI, PUMP_EVENTS, JITO_TIP_ACCOUNTS, LAMPORTS_PER_SOL } from './constants.js';
+import { normaliseQuoteMint, quoteDecimals } from './quote.js';
 
 const DISC = Object.entries(PUMP_IX).map(([name, bytes]) => [name, bytes.join(',')]);
 const EVENT_CPI_KEY = ANCHOR_EVENT_CPI.join(',');
@@ -24,27 +25,28 @@ export function decodePumpEvent(ix) {
   const name = EVENT_KEYS[Array.from(d.subarray(8, 16)).join(',')];
   if (!name) return null;
   let o = 16;
+  const take = (n) => {
+    if (n < 0 || o + n > d.length) throw new RangeError('Truncated Pump event');
+    const bytes = d.subarray(o, o + n);
+    o += n;
+    return bytes;
+  };
   const pk = () => {
-    const s = encodeBase58(d.subarray(o, o + 32));
-    o += 32;
-    return s;
+    return encodeBase58(take(32));
   };
   const u64 = () => {
-    const v = readU64LE(d, o);
-    o += 8;
-    return v;
+    return readU64LE(take(8), 0);
   };
+  const u32 = () => readU32LE(take(4), 0);
   const str = () => {
-    const [s, next] = readString(d, o);
-    o = next;
-    return s;
+    return new TextDecoder().decode(take(u32()));
   };
   try {
     if (name === 'TradeEvent') {
       const mint = pk();
-      const quoteAmount = Number(u64()) / LAMPORTS_PER_SOL;
+      let quoteAmountRaw = u64();
       const tokenAmount = Number(u64()) / 1e6;
-      const isBuy = d[o++] === 1;
+      const isBuy = take(1)[0] === 1;
       const user = pk();
       const timestamp = Number(u64());
       const vSol = Number(u64()) / LAMPORTS_PER_SOL;
@@ -52,12 +54,41 @@ export function decodePumpEvent(ix) {
       const rSol = Number(u64()) / LAMPORTS_PER_SOL;
       const rTok = Number(u64()) / 1e6;
       const feeRecipient = pk();
-      o += 8; // fee_basis_points
-      const fee = Number(u64()) / LAMPORTS_PER_SOL;
+      take(8); // fee_basis_points
+      const feeRaw = u64();
       const creator = pk();
-      o += 8; // creator_fee_basis_points
-      const creatorFee = Number(u64()) / LAMPORTS_PER_SOL;
-      return { type: 'trade', mint, quoteAmount, tokenAmount, isBuy, user, timestamp, vSol, vTok, rSol, rTok, feeRecipient, fee, creator, creatorFee, priceQuote: vTok > 0 ? vSol / vTok : null };
+      take(8); // creator_fee_basis_points
+      const creatorFeeRaw = u64();
+      let quoteMint = PROGRAMS.WSOL;
+      let virtualQuoteRaw = null;
+      let realQuoteRaw = null;
+      // Append-only fields from Pump's published IDL. The name and shareholder
+      // vector are variable length; a fixed offset lands inside them.
+      if (o < d.length) take(33); // volume flag, three counters, timestamp
+      if (o < d.length) str(); // ix_name
+      if (o < d.length) take(1); // mayhem_mode
+      if (o < d.length) take(16); // cashback basis points + amount
+      if (o < d.length) take(16); // buyback basis points + amount
+      if (o < d.length) take(u32() * 34); // Shareholder { pubkey, u16 }[]
+      if (o < d.length) {
+        quoteMint = normaliseQuoteMint(pk());
+        const amount = u64();
+        const virtual = u64();
+        const real = u64();
+        // Legacy SOL fields remain authoritative for SOL. For token quotes,
+        // those fields are not the token amounts: use the appended quote fields.
+        if (quoteMint !== PROGRAMS.WSOL) {
+          quoteAmountRaw = amount;
+          virtualQuoteRaw = virtual;
+          realQuoteRaw = real;
+        }
+      }
+      const decimals = quoteDecimals(quoteMint);
+      const scale = decimals == null ? null : 10 ** decimals;
+      const quoteAmount = scale ? Number(quoteAmountRaw) / scale : null;
+      const vQuote = quoteMint === PROGRAMS.WSOL ? vSol : scale ? Number(virtualQuoteRaw) / scale : null;
+      const rQuote = quoteMint === PROGRAMS.WSOL ? rSol : scale ? Number(realQuoteRaw) / scale : null;
+      return { type: 'trade', mint, quoteMint, quoteAmount, tokenAmount, isBuy, user, timestamp, vSol, vTok, rSol, rTok, vQuote, rQuote, feeRecipient, fee: scale ? Number(feeRaw) / scale : null, creator, creatorFee: scale ? Number(creatorFeeRaw) / scale : null, priceQuote: vTok > 0 && vQuote != null ? vQuote / vTok : null };
     }
     if (name === 'CreateEvent') {
       const tokenName = str();
@@ -72,7 +103,18 @@ export function decodePumpEvent(ix) {
       const vSol = Number(u64()) / LAMPORTS_PER_SOL;
       const rTok = Number(u64()) / 1e6;
       const supply = Number(u64()) / 1e6;
-      return { type: 'create', tokenName, symbol, uri, mint, bondingCurve, user, creator, timestamp, vTok, vSol, rTok, supply };
+      let quoteMint = PROGRAMS.WSOL;
+      let virtualQuoteRaw = null;
+      if (o < d.length) pk(); // token_program
+      if (o < d.length) take(1); // is_mayhem_mode
+      if (o < d.length) take(1); // is_cashback_enabled
+      if (o < d.length) {
+        quoteMint = normaliseQuoteMint(pk());
+        virtualQuoteRaw = u64();
+      }
+      const decimals = quoteDecimals(quoteMint);
+      const vQuote = quoteMint === PROGRAMS.WSOL ? vSol : decimals == null ? null : Number(virtualQuoteRaw) / 10 ** decimals;
+      return { type: 'create', tokenName, symbol, uri, mint, bondingCurve, user, creator, timestamp, vTok, vSol, vQuote, quoteMint, rTok, supply, priceQuote: vTok > 0 && vQuote != null ? vQuote / vTok : null };
     }
     if (name === 'CompleteEvent') {
       const user = pk();
@@ -121,16 +163,20 @@ export function decodePumpIx(ix, signers = []) {
       // All variants: [amount u64][limit u64]. "exact_*_in" variants put the quote amount first.
       const a = Number(readU64LE(data, 8));
       const b = Number(readU64LE(data, 16));
+      out.quoteMint = normaliseQuoteMint(modern ? accounts[2] : null);
+      const decimals = quoteDecimals(out.quoteMint);
+      const scale = decimals == null ? null : 10 ** decimals;
       if (name.includes('exact_sol_in') || name.includes('exact_quote_in')) {
-        out.solIn = a / LAMPORTS_PER_SOL;
+        out.quoteIn = scale ? a / scale : null;
+        out.solIn = out.quoteMint === PROGRAMS.WSOL ? out.quoteIn : null;
         out.minTokensOut = b / 1e6;
       } else {
         out.tokenAmount = a / 1e6;
-        out.solLimit = b / LAMPORTS_PER_SOL; // max_sol_cost (buy) / min_sol_output (sell)
+        out.quoteLimit = scale ? b / scale : null;
+        out.solLimit = out.quoteMint === PROGRAMS.WSOL ? out.quoteLimit : null;
       }
       if (modern) {
         out.mint = accounts[1];
-        out.quoteMint = accounts[2];
         out.user = firstSigner || accounts[8] || null;
         out.feeRecipient = null; // read from TradeEvent instead
         out.bondingCurve = accounts[5] && accounts[5] !== out.user ? accounts[5] : null;
@@ -368,7 +414,7 @@ export function txInitialisesMint(tx, mint) {
  */
 export function classifyForMint(rec, mint, wallet) {
   const ev = rec.pumpEvents?.find((e) => e.type === 'trade' && e.mint === mint && e.user === wallet);
-  if (ev) return { side: ev.isBuy ? 'buy' : 'sell', tokens: ev.tokenAmount, sol: ev.quoteAmount, priceQuote: ev.priceQuote, fromEvent: true };
+  if (ev) return { side: ev.isBuy ? 'buy' : 'sell', tokens: ev.tokenAmount, sol: ev.quoteMint === PROGRAMS.WSOL ? ev.quoteAmount : null, quoteMint: ev.quoteMint, quoteAmount: ev.quoteAmount, priceQuote: ev.priceQuote, fromEvent: true };
   const td = rec.tokenDeltas.find((d) => d.owner === wallet && d.mint === mint);
   if (!td) return { side: null, tokens: 0, sol: 0 };
   const solChange = (rec.solDelta[wallet] || 0) / LAMPORTS_PER_SOL;
