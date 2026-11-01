@@ -146,7 +146,7 @@ async function countBeyondCap(creator) {
  * @returns {{available:boolean, creator, totalCreated, exact, atLeast, firstCreatedAt, lastCreatedAt, perDay,
  *            last24h, last7d, sample:[], stats, archetype, current}}
  */
-export async function creatorProfile(creator, { currentMint, log = () => {}, samplePages = 3 } = {}) {
+export async function creatorProfile(creator, { currentMint, log = () => {}, samplePages = 3, now } = {}) {
   if (!creator) return { available: false, reason: 'no creator' };
   return cached(`profile:${creator}:${samplePages}`, 90_000, async () => {
     let page;
@@ -175,19 +175,19 @@ export async function creatorProfile(creator, { currentMint, log = () => {}, sam
     const oldest = oldestPage[0] ? normaliseCoin(oldestPage[0]) : coins[coins.length - 1] || null;
     const firstCreatedAt = oldest?.createdAt || null;
     const lastCreatedAt = coins[0]?.createdAt || null;
-    const now = Date.now();
-    const spanDays = firstCreatedAt ? Math.max(1 / 24, (now - firstCreatedAt) / 86400000) : null;
+    const currentTime = typeof now === 'number' ? now : Date.now();
+    const spanDays = firstCreatedAt ? Math.max(1 / 24, (currentTime - firstCreatedAt) / 86400000) : null;
     const total = count.total;
     // Above 2,002 coins the total is only a lower bound, so the minting rate comes from the newest 1,001
-    const recentPerDay = count.atLeast && count.recent ? count.recent.n / Math.max(1 / 24, (now - count.recent.since) / 86400000) : null;
-    const within = (ms) => coins.filter((c) => c.createdAt && now - c.createdAt <= ms).length;
+    const recentPerDay = count.atLeast && count.recent ? count.recent.n / Math.max(1 / 24, (currentTime - count.recent.since) / 86400000) : null;
+    const within = (ms) => coins.filter((c) => c.createdAt && currentTime - c.createdAt <= ms).length;
     const pageOldest = coins[coins.length - 1]?.createdAt || null;
     const sampleFull = page.length >= PAGE;
     const last24h = within(86400000);
     const last7d = within(7 * 86400000);
     // A full page that is entirely younger than the window means the true count is higher than the page
-    const last24hAtLeast = sampleFull && pageOldest && now - pageOldest <= 86400000;
-    const last7dAtLeast = sampleFull && pageOldest && now - pageOldest <= 7 * 86400000;
+    const last24hAtLeast = sampleFull && pageOldest && currentTime - pageOldest <= 86400000;
+    const last7dAtLeast = sampleFull && pageOldest && currentTime - pageOldest <= 7 * 86400000;
     const stats = summarise(sample);
     const perDay = recentPerDay ?? (spanDays ? total / spanDays : null);
     const archetype = classifyArchetype({ total, spanDays, perDay, last24h, last24hAtLeast, stats, sampleFull });

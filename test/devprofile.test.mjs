@@ -79,7 +79,7 @@ test('creatorProfile: token farm — count found by probing, archetype farm, rat
   const all = [];
   for (let i = 0; i < 1234; i++) all.push(coin(i, { creator: FARM, created_timestamp: NOW - i * 120_000, ath_market_cap: 4000 + (i % 7) * 300, ath_market_cap_timestamp: NOW - i * 120_000 }));
   const calls = stubFetch(all);
-  const p = await creatorProfile(FARM, { currentMint: 'none' });
+  const p = await creatorProfile(FARM, { currentMint: 'none', now: NOW });
   assert.equal(p.available, true);
   assert.equal(p.totalCreated, 1234);
   assert.equal(p.exact, true);
@@ -101,6 +101,19 @@ test('creatorProfile: unreachable API → available:false, nothing thrown', asyn
   const p = await creatorProfile('Unreach111111111111111111111111111111111111', { currentMint: 'x' });
   assert.equal(p.available, false);
   assert.ok(p.reason);
+});
+
+test('creatorProfile: respects mockable now option for deterministic window calculations', async () => {
+  const MOCK_WALLET = 'MockWallet111111111111111111111111111111111';
+  const t0 = 1700000000000;
+  const mockCoins = [
+    coin(0, { creator: MOCK_WALLET, created_timestamp: t0 - 1000 }),
+    coin(1, { creator: MOCK_WALLET, created_timestamp: t0 - 10_000_000 }),
+  ];
+  stubFetch(mockCoins);
+  const p = await creatorProfile(MOCK_WALLET, { currentMint: 'none', now: t0 });
+  assert.equal(p.available, true);
+  assert.equal(p.last24h, 2);
 });
 
 test('summarise + classifyArchetype thresholds', () => {
