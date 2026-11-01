@@ -7,6 +7,7 @@ import { isOnCurve, findProgramAddress } from '../src/lib/pda.js';
 import { PUMP_IX, PROGRAMS, JITO_TIP_ACCOUNTS } from '../src/lib/constants.js';
 import { parseTx, txInitialisesMint, classifyForMint, decodePumpIx } from '../src/lib/txparse.js';
 import { derivePumpAccounts, extractLaunchEvents } from '../src/lib/scan/launch.js';
+import { normalisePair, isUsdQuotedPair } from '../src/lib/market.js';
 
 const fx = JSON.parse(fs.readFileSync(new URL('./fixtures/pump-txs.json', import.meta.url), 'utf8'));
 
@@ -129,4 +130,50 @@ test('extractLaunchEvents: dev buy in the create tx is flagged as creator', () =
   assert.ok(dev && dev.isCreator && dev.inCreateTx && dev.side === 'buy');
   assert.ok(dev.sol > 0);
   assert.equal(dev.slotOffset, 0);
+});
+
+test('USDC-quoted pairs: normalisePair preserves quote metadata and derives USD price/marketCap without SOL inflation', () => {
+  const usdcPair = {
+    chainId: 'solana',
+    pairAddress: 'PoolUSDC1111111111111111111111111111111111',
+    dexId: 'raydium',
+    baseToken: { address: fx.mint, name: 'TestCoin', symbol: 'TEST' },
+    quoteToken: { address: PROGRAMS.USDC, symbol: 'USDC' },
+    priceNative: '0.0042',
+    liquidity: { usd: 50000 },
+  };
+  assert.equal(isUsdQuotedPair(usdcPair), true);
+  const norm = normalisePair(usdcPair, 1_000_000_000);
+  assert.equal(norm.isUsdQuoted, true);
+  assert.equal(norm.quoteMint, PROGRAMS.USDC);
+  assert.equal(norm.quoteSymbol, 'USDC');
+  assert.equal(norm.priceUsd, 0.0042);
+  assert.equal(norm.marketCapUsd, 4_200_000);
+  assert.equal(norm.fdvUsd, 4_200_000);
+});
+
+test('USDC-quoted pairs: decodePumpIx and parseTx rescale 6-decimal USDC quote amounts and TradeEvent priceQuote', () => {
+  const buyClone = structuredClone(fx.txs.buy);
+  // Replace quoteMint (accounts[2] on buy_exact_quote_in_v3) with SPL USDC
+  const pumpIxRaw = buyClone.transaction.message.instructions.find((ix) => ix.programId === PROGRAMS.PUMP);
+  pumpIxRaw.accounts[2] = PROGRAMS.USDC;
+  const parsed = parseTx(buyClone, 'sig-usdc-buy');
+  const b = parsed.pumpIxs.find((p) => p.kind === 'buy');
+  assert.equal(b.quoteMint, PROGRAMS.USDC);
+  assert.equal(b.quoteIsUsd, true);
+  // Raw quote amount scaled by 1e6 (USDC) instead of 1e9 (SOL) -> 1000x larger numeric unit value
+  const solParsed = parseTx(fx.txs.buy, fx.sigs.buy);
+  const bSol = solParsed.pumpIxs.find((p) => p.kind === 'buy');
+  assert.ok(Math.abs(b.solIn / bSol.solIn - 1000) < 1e-6);
+
+  const tev = parsed.pumpEvents.find((e) => e.type === 'trade');
+  const tevSol = solParsed.pumpEvents.find((e) => e.type === 'trade');
+  assert.equal(tev.quoteMint, PROGRAMS.USDC);
+  assert.equal(tev.quoteIsUsd, true);
+  assert.ok(Math.abs(tev.priceQuote / tevSol.priceQuote - 1000) < 1e-6);
+
+  const events = extractLaunchEvents([parsed], fx.mint, { record: parsed, bondingCurve: fx.bondingCurve });
+  const tradeEv = events.find((e) => e.side === 'buy');
+  assert.equal(tradeEv.quoteIsUsd, true);
+  assert.equal(tradeEv.quoteMint, PROGRAMS.USDC);
 });
