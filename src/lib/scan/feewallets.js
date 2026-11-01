@@ -6,6 +6,7 @@
 //   • a launch tool's or operator's own fee wallet — few payers, all from the same launches.
 // We tell them apart by looking at who else paid the wallet in its last dozen transactions.
 import { parseTx } from '../txparse.js';
+import known from '../../data/known.js';
 
 const memo = new Map();
 
@@ -54,6 +55,13 @@ export async function classifyFeeWallet(rpc, address, { memory } = {}) {
 export async function annotateFeeWallets(rpc, analysis, { memory, max = 3 } = {}) {
   const list = (analysis?.sharedFeeRecipients || []).slice(0, max);
   for (const f of list) {
+    const launcher = known.launchers?.[f.address];
+    if (launcher) {
+      f.launcher = launcher;
+      f.platform = false;
+      f.label = `launched with ${launcher} (confirmed fee account)`;
+      continue;
+    }
     const c = await classifyFeeWallet(rpc, f.address, { memory });
     f.platform = c.platform;
     f.payersSeen = c.payers;

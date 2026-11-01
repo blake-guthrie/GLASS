@@ -162,7 +162,10 @@ export function toolPatternReasons(a) {
   if (slot0 >= 3) reasons.push(`${slot0} wallets bought in the creation slot`);
   if (uniformity >= 0.6 && n >= 4) reasons.push(`${Math.round(uniformity * 100)}% of launch buyers share one transaction fingerprint`);
   if (identicalTipShare >= 0.6 && tipped >= 3) reasons.push(`${tipped} tipped Jito, ${Math.round(identicalTipShare * 100)}% with the identical tip`);
-  if (fees[0]?.wallets.length >= 3) reasons.push(`${fees[0].wallets.length} wallets paid the same non-protocol fee wallet (${fees[0].address.slice(0, 4)}…)`);
+  if (fees[0]?.wallets.length >= 3) {
+    const launcherTag = fees[0].launcher ? ` (${fees[0].launcher})` : '';
+    reasons.push(`${fees[0].wallets.length} wallets paid the same non-protocol fee wallet${launcherTag} (${fees[0].address.slice(0, 4)}…)`);
+  }
   if (inferred.some((b) => b.length >= 3)) reasons.push('buys appear in the same Jito bundle(s)');
   if (payers[0]?.wallets.length >= 2) reasons.push(`${payers[0].wallets.length} launch buyers had their fees paid by the same wallet (${payers[0].address.slice(0, 4)}…)`);
   if (flipped >= 3 && flipped / Math.max(1, n) >= 0.3) reasons.push(`${flipped} launch buyers sold again inside the launch window (flip bots)`);

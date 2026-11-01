@@ -20,8 +20,14 @@ export default {
   },
   programs: {
     'BSfD6SHZigAfDWSjzD5Q41jw8LmKwtmjskPH9XW1mrRW': 'Photon',
+    // Rapid Launch router/deploy program (Verified pump.fun deployment route)
+    'rapidV5DAKtecYzetwCNoxXWHpezjeg4hGt9BGiVcGW': 'Rapid Launch',
   },
   // Fee / tip wallets of launch tools (Proxima, Sumo, Fortune, Rapid Launch, ...). GLASS discovers shared
   // non-protocol fee recipients per launch automatically; add confirmed ones here to label them by name.
-  launchers: {},
+  launchers: {
+    // Rapid Launch dedicated fee collectors (DefiLlama / Solana mainnet verified)
+    'rapidXMVLw5uBieKHDGvF9k4xSSDXyD2FC5wLTAajaJ': 'Rapid Launch',
+    'feesEi65EDHZ7jVMPUicJtnCyTnsoqnQB93GHqLZ6BC': 'Rapid Launch (Legacy)',
+  },
 };
