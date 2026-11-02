@@ -21,6 +21,16 @@ function pickBestPair(pairs, mint) {
 
 export function normalisePair(p) {
   if (!p) return null;
+  const priceUsd = p.priceUsd ? Number(p.priceUsd) : null;
+  const rawNative = p.priceNative ? Number(p.priceNative) : null;
+  const quoteAddress = p.quoteToken?.address || null;
+  const quoteSymbol = p.quoteToken?.symbol || null;
+  // priceNative is expressed in the pair's quote token. For USDC/USDT-quoted pairs that is ~priceUsd, not SOL,
+  // so it must not be used to derive a SOL price or SOL-denominated figures.
+  const isSolQuote = quoteAddress === PROGRAMS.WSOL || (!quoteAddress && (quoteSymbol === 'SOL' || quoteSymbol === 'WSOL'));
+  // DexScreener reports marketCap/fdv in USD already; fall back to price × supply when neither is present.
+  let marketCapUsd = p.marketCap ?? p.fdv ?? null;
+  if (marketCapUsd == null && priceUsd != null && isFinite(priceUsd)) marketCapUsd = priceUsd * PUMP_TOTAL_SUPPLY;
   return {
     pairAddress: p.pairAddress,
     dexId: p.dexId,
@@ -28,9 +38,13 @@ export function normalisePair(p) {
     mint: p.baseToken?.address,
     name: p.baseToken?.name,
     symbol: p.baseToken?.symbol,
-    priceUsd: p.priceUsd ? Number(p.priceUsd) : null,
-    priceNative: p.priceNative ? Number(p.priceNative) : null,
-    marketCapUsd: p.marketCap ?? p.fdv ?? null,
+    quoteAddress,
+    quoteSymbol,
+    isSolQuote,
+    priceUsd,
+    priceNative: isSolQuote ? rawNative : null,
+    priceNativeQuote: rawNative,
+    marketCapUsd,
     fdvUsd: p.fdv ?? null,
     liquidityUsd: p.liquidity?.usd ?? null,
     volume24h: p.volume?.h24 ?? null,
