@@ -76,8 +76,9 @@ test('creatorProfile: small creator — exact count, current token separated fro
 
 test('creatorProfile: token farm — count found by probing, archetype farm, rating capped', async () => {
   const FARM = 'FarmWallet1111111111111111111111111111111111';
+  const t0 = Date.now(); // the minting-rate maths runs against the real clock
   const all = [];
-  for (let i = 0; i < 1234; i++) all.push(coin(i, { creator: FARM, created_timestamp: NOW - i * 120_000, ath_market_cap: 4000 + (i % 7) * 300, ath_market_cap_timestamp: NOW - i * 120_000 }));
+  for (let i = 0; i < 1234; i++) all.push(coin(i, { creator: FARM, created_timestamp: t0 - i * 120_000, ath_market_cap: 4000 + (i % 7) * 300, ath_market_cap_timestamp: t0 - i * 120_000 }));
   const calls = stubFetch(all);
   const p = await creatorProfile(FARM, { currentMint: 'none' });
   assert.equal(p.available, true);
