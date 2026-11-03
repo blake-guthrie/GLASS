@@ -19,7 +19,7 @@ function pickBestPair(pairs, mint) {
   return list[0];
 }
 
-export function normalisePair(p) {
+export function normalisePair(p, supply = null) {
   if (!p) return null;
   return {
     pairAddress: p.pairAddress,
@@ -30,7 +30,7 @@ export function normalisePair(p) {
     symbol: p.baseToken?.symbol,
     priceUsd: p.priceUsd ? Number(p.priceUsd) : null,
     priceNative: p.priceNative ? Number(p.priceNative) : null,
-    marketCapUsd: p.marketCap ?? p.fdv ?? null,
+    marketCapUsd: (p.marketCap ?? p.fdv) ?? (p.priceUsd != null && supply != null ? p.priceUsd * supply : null),
     fdvUsd: p.fdv ?? null,
     liquidityUsd: p.liquidity?.usd ?? null,
     volume24h: p.volume?.h24 ?? null,
@@ -49,7 +49,7 @@ export async function dexTokenInfo(mint) {
     try {
       const r = await fetchJson(`${SOURCES.dexscreener}/latest/dex/tokens/${mint}`, { retries: 1 });
       const all = (r?.pairs || []).filter((p) => p.chainId === 'solana');
-      const best = normalisePair(pickBestPair(all, mint));
+      const best = normalisePair(pickBestPair(all, mint), PUMP_TOTAL_SUPPLY);
       const earliest = all.map((p) => p.pairCreatedAt).filter(Boolean).sort((a, b) => a - b)[0] || null;
       if (best) best.earliestPairCreatedAt = earliest; // the first pool anywhere = tight upper bound on creation time
       return { best, pairs: all.map(normalisePair) };
@@ -72,7 +72,7 @@ export async function dexTokensBulk(mints) {
         const m = p.baseToken?.address;
         (byMint[m] ||= []).push(p);
       }
-      for (const m of group) out[m] = normalisePair(pickBestPair(byMint[m] || [], m));
+      for (const m of group) out[m] = normalisePair(pickBestPair(byMint[m] || [], m), PUMP_TOTAL_SUPPLY);
     } catch (e) {
       for (const m of group) out[m] = null;
     }
@@ -84,7 +84,7 @@ export async function dexPairInfo(pairAddress) {
   return cached(`dex:pair:${pairAddress}`, 60_000, async () => {
     try {
       const r = await fetchJson(`${SOURCES.dexscreener}/latest/dex/pairs/solana/${pairAddress}`, { retries: 1 });
-      return normalisePair((r?.pairs || r?.pair ? r.pairs || [r.pair] : [])[0]);
+      return normalisePair((r?.pairs || r?.pair ? r.pairs || [r.pair] : [])[0], PUMP_TOTAL_SUPPLY);
     } catch {
       return null;
     }
