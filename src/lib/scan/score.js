@@ -87,7 +87,7 @@ export function callFor({ score, launch, wallets, live, operator, ctx = {} }) {
   let level;
   if (farm) {
     level = 'avoid';
-    why.push(`token farm: this wallet has launched ${prof.totalCreated.toLocaleString()}${prof.atLeast ? '+' : ''} tokens${prof.stats?.ranRate != null ? `, ${Math.round((1 - prof.stats.ranRate) * 100)}% never ran` : ''}`);
+    why.push(`token farm: this wallet has launched ${prof.totalCreated.toLocaleString('en-US')}${prof.atLeast ? '+' : ''} tokens${prof.stats?.ranRate != null ? `, ${Math.round((1 - prof.stats.ranRate) * 100)}% never ran` : ''}`);
   } else if (dumping && (soldShare == null || soldShare >= 0.3)) {
     level = 'avoid';
     const devOnly = (s.walletsTracked || 0) <= 1;

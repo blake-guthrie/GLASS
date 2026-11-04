@@ -176,7 +176,8 @@ export async function creatorProfile(creator, { currentMint, log = () => {}, sam
     const firstCreatedAt = oldest?.createdAt || null;
     const lastCreatedAt = coins[0]?.createdAt || null;
     const now = Date.now();
-    const spanDays = firstCreatedAt ? Math.max(1 / 24, (now - firstCreatedAt) / 86400000) : null;
+    const effectiveNow = (lastCreatedAt && now - lastCreatedAt > 86400000 * 2) ? (lastCreatedAt + 3600000) : now;
+    const spanDays = firstCreatedAt ? Math.max(1 / 24, (effectiveNow - firstCreatedAt) / 86400000) : null;
     const total = count.total;
     // Above 2,002 coins the total is only a lower bound, so the minting rate comes from the newest 1,001
     const recentPerDay = count.atLeast && count.recent ? count.recent.n / Math.max(1 / 24, (now - count.recent.since) / 86400000) : null;

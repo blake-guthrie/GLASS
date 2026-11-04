@@ -256,10 +256,11 @@ export async function runScan(rpc, identifier, opts = {}) {
       const last = [...events].reverse().find((e) => e.priceQuote);
       const createEv = creation.record.pumpEvents?.find((e) => e.type === 'create');
       const priceQuote = last?.priceQuote ?? (createEv?.vSol && createEv?.vTok ? createEv.vSol / createEv.vTok : null);
-      const sol = priceQuote ? await solPriceUsd() : null;
-      if (priceQuote && sol) {
-        report.market.marketCapUsd = priceQuote * report.supply * sol;
-        report.market.priceUsd = priceQuote * sol;
+      const isUsdQuoted = report.market?.quoteSymbol?.toUpperCase().includes('USD') || report.market?.quoteAddress === PROGRAMS.USDC;
+      const quoteMultiplier = isUsdQuoted ? 1 : (priceQuote ? await solPriceUsd() : null);
+      if (priceQuote && quoteMultiplier) {
+        report.market.marketCapUsd = priceQuote * report.supply * quoteMultiplier;
+        report.market.priceUsd = priceQuote * quoteMultiplier;
         report.market.mcapSource = last ? 'last launch-window trade' : 'initial bonding-curve price (no trades yet)';
         if (!report.market.dexId) report.market.dexId = 'pumpfun';
       }
