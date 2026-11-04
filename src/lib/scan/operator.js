@@ -503,7 +503,7 @@ export function rateOperator(launches, current = {}) {
   const infra = usable.filter((l) => l.viaInfra && l.relation !== 'created').length;
   if (profile) {
     const p = profile;
-    const cnt = `${p.totalCreated.toLocaleString()}${p.atLeast ? '+' : ''}`;
+    const cnt = `${p.totalCreated.toLocaleString('en-US')}${p.atLeast ? '+' : ''}`;
     const since = p.firstCreatedAt ? ` since ${new Date(p.firstCreatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: p.spanDays > 300 ? 'numeric' : undefined })}` : '';
     const rate = p.perDay != null && p.totalCreated >= 5 ? (p.perDay >= 1 ? ` (≈${Math.round(p.perDay)} per day${p.perDayRecent ? ' lately' : ''})` : p.perDay * 7 >= 1 ? ` (≈${Math.round(p.perDay * 7)} per week${p.perDayRecent ? ' lately' : ''})` : '') : '';
     r.push(`This creator wallet has launched ${cnt} token${p.totalCreated === 1 ? '' : 's'} on pump.fun${since}${rate}${p.last24hAtLeast ? `, ${p.last24h}+ in the last 24 h` : p.last24h >= 3 ? `, ${p.last24h} in the last 24 h` : ''}`);

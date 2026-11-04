@@ -12,26 +12,44 @@ async function cached(key, ttlMs, fn) {
 }
 
 function pickBestPair(pairs, mint) {
-  const list = (pairs || []).filter((p) => p.chainId === 'solana' && (!mint || p.baseToken?.address === mint));
+  const list = (pairs || []).filter((p) => p.chainId === 'solana' && (!mint || p.baseToken?.address === mint || p.quoteToken?.address === mint));
   if (!list.length) return null;
   // Prefer the pair with the most liquidity, but pump.fun bonding curves have no "liquidity" field → use volume/fdv.
   list.sort((a, b) => (b.liquidity?.usd || b.volume?.h24 || 0) - (a.liquidity?.usd || a.volume?.h24 || 0));
   return list[0];
 }
 
-export function normalisePair(p) {
+export function normalisePair(p, mint) {
   if (!p) return null;
+  const isQuote = mint && p.quoteToken?.address === mint;
+  const token = isQuote ? p.quoteToken : p.baseToken;
+  const quote = isQuote ? p.baseToken : p.quoteToken;
+
+  let priceUsd = p.priceUsd ? Number(p.priceUsd) : null;
+  let priceNative = p.priceNative ? Number(p.priceNative) : null;
+  if (isQuote && priceNative && priceNative > 0) {
+    const isUsd = quote?.symbol?.toUpperCase().includes('USD') || quote?.address === PROGRAMS.USDC;
+    if (isUsd) priceUsd = 1 / priceNative;
+  }
+
+  let mcap = p.marketCap ?? p.fdv ?? null;
+  if (isQuote && priceUsd) {
+    mcap = priceUsd * 1e9;
+  }
+
   return {
     pairAddress: p.pairAddress,
     dexId: p.dexId,
     url: p.url,
-    mint: p.baseToken?.address,
-    name: p.baseToken?.name,
-    symbol: p.baseToken?.symbol,
-    priceUsd: p.priceUsd ? Number(p.priceUsd) : null,
-    priceNative: p.priceNative ? Number(p.priceNative) : null,
-    marketCapUsd: p.marketCap ?? p.fdv ?? null,
-    fdvUsd: p.fdv ?? null,
+    mint: token?.address,
+    name: token?.name,
+    symbol: token?.symbol,
+    quoteSymbol: quote?.symbol,
+    quoteAddress: quote?.address,
+    priceUsd,
+    priceNative,
+    marketCapUsd: mcap,
+    fdvUsd: mcap,
     liquidityUsd: p.liquidity?.usd ?? null,
     volume24h: p.volume?.h24 ?? null,
     pairCreatedAt: p.pairCreatedAt ?? null,
@@ -49,10 +67,10 @@ export async function dexTokenInfo(mint) {
     try {
       const r = await fetchJson(`${SOURCES.dexscreener}/latest/dex/tokens/${mint}`, { retries: 1 });
       const all = (r?.pairs || []).filter((p) => p.chainId === 'solana');
-      const best = normalisePair(pickBestPair(all, mint));
+      const best = normalisePair(pickBestPair(all, mint), mint);
       const earliest = all.map((p) => p.pairCreatedAt).filter(Boolean).sort((a, b) => a - b)[0] || null;
       if (best) best.earliestPairCreatedAt = earliest; // the first pool anywhere = tight upper bound on creation time
-      return { best, pairs: all.map(normalisePair) };
+      return { best, pairs: all.map((x) => normalisePair(x, mint)) };
     } catch (e) {
       return { best: null, pairs: [], error: e.message };
     }
@@ -69,10 +87,12 @@ export async function dexTokensBulk(mints) {
       const byMint = {};
       for (const p of r?.pairs || []) {
         if (p.chainId !== 'solana') continue;
-        const m = p.baseToken?.address;
-        (byMint[m] ||= []).push(p);
+        const b = p.baseToken?.address;
+        const q = p.quoteToken?.address;
+        if (b) (byMint[b] ||= []).push(p);
+        if (q) (byMint[q] ||= []).push(p);
       }
-      for (const m of group) out[m] = normalisePair(pickBestPair(byMint[m] || [], m));
+      for (const m of group) out[m] = normalisePair(pickBestPair(byMint[m] || [], m), m);
     } catch (e) {
       for (const m of group) out[m] = null;
     }
