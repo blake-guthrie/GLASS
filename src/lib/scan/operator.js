@@ -4,7 +4,7 @@ import { parseTx } from '../txparse.js';
 import { pMap } from '../http.js';
 import { dexTokensBulk, priceHistory, solPriceUsd } from '../market.js';
 import { derivePumpAccounts } from './launch.js';
-import { PUMP_TOTAL_SUPPLY, PROGRAMS } from '../constants.js';
+import { PUMP_TOTAL_SUPPLY, PROGRAMS, quoteToUsd } from '../constants.js';
 
 const GRADUATION_MCAP = 69_000;
 
@@ -272,7 +272,6 @@ export async function analysePriorLaunches(rpc, launches, cluster, sigLists, { s
  * curve's recent trades). Lower bound on the real peak, but good enough to rank a serial launcher.
  */
 async function onchainOutcome(rpc, launch, exit, supply, solUsd) {
-  if (!solUsd) return null;
   try {
     const { bondingCurve } = await derivePumpAccounts(launch.mint);
     const sigs = (await rpc.getSignaturesForAddress(bondingCurve, { limit: 60 })) || [];
@@ -285,12 +284,14 @@ async function onchainOutcome(rpc, launch, exit, supply, solUsd) {
     let lastQuote = null;
     let lastT = 0;
     let trades = 0;
+    let quoteMint = null;
     raws.forEach((raw, i) => {
       const rec = parseTx(raw, uniq[i].signature);
       if (!rec || rec.err) return;
       for (const e of rec.pumpEvents || []) {
         if (e.type !== 'trade' || e.mint !== launch.mint || !e.priceQuote) continue;
         trades++;
+        quoteMint ||= e.quoteMint || null;
         if (e.priceQuote > peakQuote) peakQuote = e.priceQuote;
         if ((rec.blockTime || 0) >= lastT) {
           lastT = rec.blockTime || 0;
@@ -299,8 +300,9 @@ async function onchainOutcome(rpc, launch, exit, supply, solUsd) {
       }
     });
     for (const s of exit?.sellsDetail || []) if (s.priceQuote > peakQuote) peakQuote = s.priceQuote;
-    if (!peakQuote) return null;
-    return { peakMcapUsd: peakQuote * supply * solUsd, nowMcapUsd: lastQuote ? lastQuote * supply * solUsd : null, trades };
+    const usd = quoteToUsd(quoteMint, solUsd);
+    if (!peakQuote || !usd) return null;
+    return { peakMcapUsd: peakQuote * supply * usd, nowMcapUsd: lastQuote ? lastQuote * supply * usd : null, trades };
   } catch {
     return null;
   }
@@ -336,18 +338,19 @@ export async function devExitOnLaunch(rpc, creator, launch, supply, solUsd, { to
       for (const e of rec.pumpEvents || []) {
         if (e.type !== 'trade' || e.mint !== launch.mint || e.user !== creator) continue;
         if (e.isBuy) bought += e.tokenAmount;
-        else sells.push({ t: rec.blockTime * 1000, tokens: e.tokenAmount, sol: e.quoteAmount, priceQuote: e.priceQuote, minutes: createdSec ? (rec.blockTime - createdSec) / 60 : null });
+        else sells.push({ t: rec.blockTime * 1000, tokens: e.tokenAmount, sol: e.quoteAmount, quoteMint: e.quoteMint || null, priceQuote: e.priceQuote, minutes: createdSec ? (rec.blockTime - createdSec) / 60 : null });
       }
       if (!(rec.pumpEvents || []).length) {
         const td = rec.tokenDeltas?.find((d) => d.mint === launch.mint && d.owner === creator && d.delta < 0);
-        if (td) sells.push({ t: rec.blockTime * 1000, tokens: -td.delta, sol: Math.max(0, (rec.solDelta[creator] || 0) / 1e9), priceQuote: null, minutes: createdSec ? (rec.blockTime - createdSec) / 60 : null });
+        if (td) sells.push({ t: rec.blockTime * 1000, tokens: -td.delta, sol: Math.max(0, (rec.solDelta[creator] || 0) / 1e9), quoteMint: null, priceQuote: null, minutes: createdSec ? (rec.blockTime - createdSec) / 60 : null });
       }
     });
     if (!sells.length) return { sampledTxs: ordered.length, sells: 0, firstSellMin: null, soldPct: 0, note: bought ? 'dev still holds (no sell in the token account history)' : 'no dev sell found' };
     sells.sort((a, b) => a.t - b.t);
     const first = sells[0];
     const soldTokens = sells.reduce((a, x) => a + x.tokens, 0);
-    const mcapAt = first.priceQuote && solUsd ? first.priceQuote * supply * solUsd : null;
+    const usd = first.priceQuote ? quoteToUsd(first.quoteMint, solUsd) : null;
+    const mcapAt = usd ? first.priceQuote * supply * usd : null;
     const peakRef = launch.peakMcapUsd || null;
     return {
       sampledTxs: ordered.length,
@@ -396,11 +399,11 @@ export async function clusterExitOnLaunch(rpc, launch, cluster, sigLists, hist, 
       sampled++;
       const ev = (rec.pumpEvents || []).find((e) => e.type === 'trade' && e.mint === launch.mint && e.user === w && !e.isBuy);
       if (ev) {
-        sells.push({ wallet: w, t: rec.blockTime * 1000, tokens: ev.tokenAmount, sol: ev.quoteAmount, priceQuote: ev.priceQuote, minutes: (rec.blockTime - createdSec) / 60 });
+        sells.push({ wallet: w, t: rec.blockTime * 1000, tokens: ev.tokenAmount, sol: ev.quoteAmount, quoteMint: ev.quoteMint || null, priceQuote: ev.priceQuote, minutes: (rec.blockTime - createdSec) / 60 });
         return;
       }
       const td = rec.tokenDeltas.find((d) => d.mint === launch.mint && d.owner === w && d.delta < 0);
-      if (td) sells.push({ wallet: w, t: rec.blockTime * 1000, tokens: -td.delta, sol: Math.max(0, (rec.solDelta[w] || 0) / 1e9), priceQuote: null, minutes: (rec.blockTime - createdSec) / 60 });
+      if (td) sells.push({ wallet: w, t: rec.blockTime * 1000, tokens: -td.delta, sol: Math.max(0, (rec.solDelta[w] || 0) / 1e9), quoteMint: null, priceQuote: null, minutes: (rec.blockTime - createdSec) / 60 });
     });
   }
   if (!sells.length) return { sampledTxs: sampled, sells: 0, firstSellMin: null, soldPctAtFirstSell: null, mcapAtFirstSellUsd: null, soldBeforePeak: null };
@@ -409,7 +412,8 @@ export async function clusterExitOnLaunch(rpc, launch, cluster, sigLists, hist, 
   const soldTokens = sells.reduce((s, x) => s + x.tokens, 0);
   // mcap at first sell: exact from the trade's post-trade price when we have it, else from candles
   let mcapAt = null;
-  if (first.priceQuote && solUsd) mcapAt = first.priceQuote * supply * solUsd;
+  const usd = first.priceQuote ? quoteToUsd(first.quoteMint, solUsd) : null;
+  if (usd) mcapAt = first.priceQuote * supply * usd;
   else if (hist?.available) mcapAt = mcapAtTime(hist, first.t);
   // Peak reference: candles when we have them, else the launch's known ATH (pump.fun record)
   const peakRef = hist?.available ? hist.peakMcapUsd : launch.peakMcapUsd || null;

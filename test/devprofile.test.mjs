@@ -7,7 +7,7 @@ import { rateOperator } from '../src/lib/scan/operator.js';
 import { callFor, computeScore } from '../src/lib/scan/score.js';
 
 const CREATOR = 'GJNLXhQPe3pb5uQfPQLiHicZzEPRAruGsUUYCvbZBCtN';
-const NOW = 1792386160000;
+const NOW = Date.now();
 
 // Three real rows from pump.fun's API (Oct 2026) + synthetic ones in the same shape
 function coin(i, over = {}) {
