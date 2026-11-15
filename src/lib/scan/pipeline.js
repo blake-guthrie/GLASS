@@ -1,5 +1,5 @@
 // Orchestrates the stages and streams partial reports so the panel fills in progressively.
-import { DEFAULTS, PUMP_TOTAL_SUPPLY } from '../constants.js';
+import { DEFAULTS, PUMP_TOTAL_SUPPLY, quoteToUsd } from '../constants.js';
 import { resolveMint } from './resolve.js';
 import { findCreation, collectLaunchTxs, extractLaunchEvents } from './launch.js';
 import { analyseLaunch, enrichWithJito, applyWalletKinds, toolPatternReasons } from './fingerprint.js';
@@ -256,10 +256,12 @@ export async function runScan(rpc, identifier, opts = {}) {
       const last = [...events].reverse().find((e) => e.priceQuote);
       const createEv = creation.record.pumpEvents?.find((e) => e.type === 'create');
       const priceQuote = last?.priceQuote ?? (createEv?.vSol && createEv?.vTok ? createEv.vSol / createEv.vTok : null);
-      const sol = priceQuote ? await solPriceUsd() : null;
-      if (priceQuote && sol) {
-        report.market.marketCapUsd = priceQuote * report.supply * sol;
-        report.market.priceUsd = priceQuote * sol;
+      const quoteMint = last?.quoteMint || createEv?.quoteMint || report.market.quoteMint || null;
+      const usd = priceQuote ? quoteToUsd(quoteMint, await solPriceUsd()) : null;
+      if (priceQuote && usd) {
+        report.market.quoteMint = quoteMint;
+        report.market.marketCapUsd = priceQuote * report.supply * usd;
+        report.market.priceUsd = priceQuote * usd;
         report.market.mcapSource = last ? 'last launch-window trade' : 'initial bonding-curve price (no trades yet)';
         if (!report.market.dexId) report.market.dexId = 'pumpfun';
       }

@@ -1,6 +1,6 @@
 // Normalise a `jsonParsed` Solana transaction into the flat record the scanners work with.
 import { decodeBase58, encodeBase58, readU32LE, readU64LE } from './base58.js';
-import { PROGRAMS, PUMP_IX, PUMP_BUY_IX, PUMP_SELL_IX, PUMP_CREATE_IX, ANCHOR_EVENT_CPI, PUMP_EVENTS, JITO_TIP_ACCOUNTS, LAMPORTS_PER_SOL } from './constants.js';
+import { PROGRAMS, PUMP_IX, PUMP_BUY_IX, PUMP_SELL_IX, PUMP_CREATE_IX, ANCHOR_EVENT_CPI, PUMP_EVENTS, JITO_TIP_ACCOUNTS, LAMPORTS_PER_SOL, quoteDecimals } from './constants.js';
 
 const DISC = Object.entries(PUMP_IX).map(([name, bytes]) => [name, bytes.join(',')]);
 const EVENT_CPI_KEY = ANCHOR_EVENT_CPI.join(',');
@@ -17,12 +17,13 @@ function discName(data) {
  * Decode a pump.fun Anchor event CPI (inner self-invoke). Returns null if not an event we know.
  * TradeEvent gives exact quote/token amounts, the trader, and post-trade virtual reserves (= price).
  */
-export function decodePumpEvent(ix) {
+export function decodePumpEvent(ix, quoteMint) {
   const d = safeDecode(ix.data);
   if (!d || d.length < 16) return null;
   if (Array.from(d.subarray(0, 8)).join(',') !== EVENT_CPI_KEY) return null;
   const name = EVENT_KEYS[Array.from(d.subarray(8, 16)).join(',')];
   if (!name) return null;
+  const quoteDiv = 10 ** quoteDecimals(quoteMint);
   let o = 16;
   const pk = () => {
     const s = encodeBase58(d.subarray(o, o + 32));
@@ -42,22 +43,22 @@ export function decodePumpEvent(ix) {
   try {
     if (name === 'TradeEvent') {
       const mint = pk();
-      const quoteAmount = Number(u64()) / LAMPORTS_PER_SOL;
+      const quoteAmount = Number(u64()) / quoteDiv;
       const tokenAmount = Number(u64()) / 1e6;
       const isBuy = d[o++] === 1;
       const user = pk();
       const timestamp = Number(u64());
-      const vSol = Number(u64()) / LAMPORTS_PER_SOL;
+      const vSol = Number(u64()) / quoteDiv;
       const vTok = Number(u64()) / 1e6;
-      const rSol = Number(u64()) / LAMPORTS_PER_SOL;
+      const rSol = Number(u64()) / quoteDiv;
       const rTok = Number(u64()) / 1e6;
       const feeRecipient = pk();
       o += 8; // fee_basis_points
-      const fee = Number(u64()) / LAMPORTS_PER_SOL;
+      const fee = Number(u64()) / quoteDiv;
       const creator = pk();
       o += 8; // creator_fee_basis_points
-      const creatorFee = Number(u64()) / LAMPORTS_PER_SOL;
-      return { type: 'trade', mint, quoteAmount, tokenAmount, isBuy, user, timestamp, vSol, vTok, rSol, rTok, feeRecipient, fee, creator, creatorFee, priceQuote: vTok > 0 ? vSol / vTok : null };
+      const creatorFee = Number(u64()) / quoteDiv;
+      return { type: 'trade', mint, quoteMint: quoteMint || null, quoteAmount, tokenAmount, isBuy, user, timestamp, vSol, vTok, rSol, rTok, feeRecipient, fee, creator, creatorFee, priceQuote: vTok > 0 ? vSol / vTok : null };
     }
     if (name === 'CreateEvent') {
       const tokenName = str();
@@ -69,10 +70,10 @@ export function decodePumpEvent(ix) {
       const creator = pk();
       const timestamp = Number(u64());
       const vTok = Number(u64()) / 1e6;
-      const vSol = Number(u64()) / LAMPORTS_PER_SOL;
+      const vSol = Number(u64()) / quoteDiv;
       const rTok = Number(u64()) / 1e6;
       const supply = Number(u64()) / 1e6;
-      return { type: 'create', tokenName, symbol, uri, mint, bondingCurve, user, creator, timestamp, vTok, vSol, rTok, supply };
+      return { type: 'create', quoteMint: quoteMint || null, tokenName, symbol, uri, mint, bondingCurve, user, creator, timestamp, vTok, vSol, rTok, supply };
     }
     if (name === 'CompleteEvent') {
       const user = pk();
@@ -218,6 +219,7 @@ export function parseTx(tx, signatureHint) {
   const splTransfers = []; // {fromAcct, toAcct, fromOwner, toOwner, mint, amount, inner}
   const pumpIxs = [];
   const pumpEvents = [];
+  const pumpEventIxs = [];
   const closeAccounts = [];
   const programs = []; // top-level program ids in order
   const ataCreates = [];
@@ -275,6 +277,7 @@ export function parseTx(tx, signatureHint) {
       const evt = inner ? decodePumpEvent(ix) : null;
       if (evt) {
         pumpEvents.push(evt);
+        pumpEventIxs.push(ix);
         return;
       }
       const dec = decodePumpIx(ix, signers);
@@ -289,6 +292,15 @@ export function parseTx(tx, signatureHint) {
     const group = innerGroups.find((g) => g.index === i);
     if (group) for (const inner of group.instructions) visit(inner, true, ix.programId);
   });
+
+  const quoteByMint = new Map();
+  for (const p of pumpIxs) if (p.mint && p.quoteMint) quoteByMint.set(p.mint, p.quoteMint);
+  for (let i = 0; i < pumpEvents.length; i++) {
+    const quoteMint = quoteByMint.get(pumpEvents[i].mint);
+    if (!quoteMint) continue;
+    const decoded = decodePumpEvent(pumpEventIxs[i], quoteMint);
+    if (decoded) pumpEvents[i] = decoded;
+  }
 
   // Jito tip = system transfer to a tip account (anywhere) or SOL delta into a tip account
   let jitoTip = 0;

@@ -1,6 +1,6 @@
 // Market data: DexScreener (pairs, price, mcap), GeckoTerminal (OHLCV → peaks), Jito bundles, pump.fun API (optional).
 import { fetchJson } from './http.js';
-import { SOURCES, PROGRAMS, PUMP_TOTAL_SUPPLY } from './constants.js';
+import { SOURCES, PROGRAMS, PUMP_TOTAL_SUPPLY, USD_STABLE_MINTS } from './constants.js';
 
 const memo = new Map();
 async function cached(key, ttlMs, fn) {
@@ -21,6 +21,11 @@ function pickBestPair(pairs, mint) {
 
 export function normalisePair(p) {
   if (!p) return null;
+  const quoteMint = p.quoteToken?.address || null;
+  const isUsdQuoted = USD_STABLE_MINTS.has(quoteMint);
+  const priceNative = p.priceNative ? Number(p.priceNative) : null;
+  const priceUsd = p.priceUsd ? Number(p.priceUsd) : isUsdQuoted ? priceNative : null;
+  const marketCapUsd = p.marketCap ?? p.fdv ?? (priceUsd != null ? priceUsd * PUMP_TOTAL_SUPPLY : null);
   return {
     pairAddress: p.pairAddress,
     dexId: p.dexId,
@@ -28,9 +33,12 @@ export function normalisePair(p) {
     mint: p.baseToken?.address,
     name: p.baseToken?.name,
     symbol: p.baseToken?.symbol,
-    priceUsd: p.priceUsd ? Number(p.priceUsd) : null,
-    priceNative: p.priceNative ? Number(p.priceNative) : null,
-    marketCapUsd: p.marketCap ?? p.fdv ?? null,
+    quoteMint,
+    quoteSymbol: p.quoteToken?.symbol || null,
+    isUsdQuoted,
+    priceUsd,
+    priceNative,
+    marketCapUsd,
     fdvUsd: p.fdv ?? null,
     liquidityUsd: p.liquidity?.usd ?? null,
     volume24h: p.volume?.h24 ?? null,
@@ -52,7 +60,7 @@ export async function dexTokenInfo(mint) {
       const best = normalisePair(pickBestPair(all, mint));
       const earliest = all.map((p) => p.pairCreatedAt).filter(Boolean).sort((a, b) => a - b)[0] || null;
       if (best) best.earliestPairCreatedAt = earliest; // the first pool anywhere = tight upper bound on creation time
-      return { best, pairs: all.map(normalisePair) };
+      return { best, pairs: all.map((p) => normalisePair(p)) };
     } catch (e) {
       return { best: null, pairs: [], error: e.message };
     }

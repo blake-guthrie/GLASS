@@ -16,6 +16,8 @@ export const PROGRAMS = {
   RAYDIUM_CPMM: 'CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C',
   METEORA_DLMM: 'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo',
   WSOL: 'So11111111111111111111111111111111111111112',
+  USDC: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+  USDT: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
 };
 
 // Labels for routers / trading bots that wrap pump.fun buys. Used for the "route" fingerprint.
@@ -81,6 +83,15 @@ export const PUMP_EVENTS = {
 
 export const LAMPORTS_PER_SOL = 1_000_000_000;
 export const PUMP_TOTAL_SUPPLY = 1_000_000_000; // tokens (6 decimals)
+
+export const USD_STABLE_MINTS = new Set([PROGRAMS.USDC, PROGRAMS.USDT]);
+export const QUOTE_MINT_DECIMALS = {
+  [PROGRAMS.WSOL]: 9,
+  [PROGRAMS.USDC]: 6,
+  [PROGRAMS.USDT]: 6,
+};
+export const quoteDecimals = (quoteMint) => QUOTE_MINT_DECIMALS[quoteMint] ?? 9;
+export const quoteToUsd = (quoteMint, solUsd) => (USD_STABLE_MINTS.has(quoteMint) ? 1 : solUsd);
 export const PUMP_CURVE_SOL_TARGET = 85; // approx SOL to fill the bonding curve
 export const AVG_SLOT_MS = 400;
 
